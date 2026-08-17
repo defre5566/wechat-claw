@@ -17,3 +17,6 @@ agent-SDK/push_token
 modules/emotion/anniversaries.json.enc
 # 共享缓存（运行产物）
 modules/common/shared/*.json
+
+# 会话接续文档（分发改造用，不进分发产物）
+PLAN.md
