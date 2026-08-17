@@ -1,0 +1,29 @@
+// wechat-claw 对话 agent 权限配置示例（opencode ACP 子进程加载）
+// 使用：复制为项目根 opencode.jsonc 即可直接生效（默认路径，无需修改）；
+//       不放置 = opencode 默认权限（全 ask，也能运行）。
+// 配套：与 AGENTS.md「安全红线」一致——deny 四项为硬性边界，文件发送由 bridge 三级规则兜底。
+// 注意：permission 对象按顺序匹配（后命中优先），宽规则在前、窄规则在后，勿调整顺序。
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "permission": {
+    // 项目外目录访问：默认放开家目录（读个人文档/发送文件需要）；可收窄为具体目录，如 "~/文档/**": "allow"
+    "external_directory": {
+      "~/**": "allow"
+    },
+
+    // 读：项目内默认放开，硬拒 token/密钥（安全红线，勿删）
+    "read": {
+      "**": "allow",
+      "modules/**/token": "deny",
+      "agent-SDK/push_token": "deny",
+      "modules/**/anniversaries.json.enc": "deny",
+      "~/.config/wechat-claw/secret.key": "deny"
+    },
+
+    // 写类：默认 ask（走微信确认），不配置豁免即全部需确认。
+    // 如需免确认目录（如个人待办库），仿照下方示例添加（示例路径请替换为自己的目录）：
+    // "edit":  { "~/<个人目录>/**": "allow" },
+    // "write": { "~/<个人目录>/**": "allow" }
+  }
+}
