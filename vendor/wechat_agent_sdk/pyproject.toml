@@ -28,3 +28,7 @@ packages = [
     "wechat_agent_sdk.messaging",
     "wechat_agent_sdk.utils",
 ]
+
+# 快照平铺布局：本目录即包目录（无嵌套 wechat_agent_sdk/ 层），显式映射
+[tool.setuptools.package-dir]
+wechat_agent_sdk = "."
