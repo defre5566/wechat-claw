@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""wechat-agent-sdk 三处本地补丁：检测 / 打补丁 / 校验（幂等）。
+"""wechat-agent-sdk 本地补丁：检测 / 打补丁 / 校验（幂等）。
 
 用法（用项目 venv 的 python 运行）:
-    .venv/bin/python patches/apply_patches.py             # 检测并打补丁
-    .venv/bin/python patches/apply_patches.py --check-only # 只检测报告
+    .venv/bin/python patches/apply_patches.py                    # 检测并打补丁（site-packages）
+    .venv/bin/python patches/apply_patches.py --check-only       # 只检测报告
+    .venv/bin/python patches/apply_patches.py --vendor [--check-only]  # 目标为 vendor/wechat_agent_sdk 快照（分发/CI 校验用）
 
 原理: 每个补丁 = (原版锚点 → 补丁文本)。文件含补丁特征 → 已打跳过；
 含原版锚点(且唯一) → 替换打补丁；两者皆无 → 报异常（SDK 版本/改动未知）。
@@ -15,8 +16,9 @@ import py_compile
 import sys
 import sysconfig
 
+VENDOR = pathlib.Path(__file__).resolve().parent.parent / "vendor" / "wechat_agent_sdk"
 SITE = pathlib.Path(sysconfig.get_paths()["purelib"])
-SDK = SITE / "wechat_agent_sdk"
+SDK = VENDOR if "--vendor" in sys.argv else SITE / "wechat_agent_sdk"
 CDN = SDK / "media" / "cdn.py"
 TRANSPORT = SDK / "transport.py"
 
@@ -81,8 +83,9 @@ def apply(file: pathlib.Path, original: str, patched: str) -> bool:
 
 def main() -> int:
     check_only = "--check-only" in sys.argv
+    mode = "vendor 快照" if "--vendor" in sys.argv else "site-packages"
     all_ok = True
-    print(f"SDK 目录: {SDK}")
+    print(f"SDK 目录: {SDK}（{mode}）")
 
     for file, original, patched, feature, desc in PATCHES:
         if not file.is_file():

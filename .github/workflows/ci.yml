@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Install vendored SDK (editable)
+        run: pip install -e ./vendor/wechat_agent_sdk
+      - name: Tests
+        run: pytest tests/ -v
+      - name: Verify vendor patches
+        run: python patches/apply_patches.py --vendor --check-only
