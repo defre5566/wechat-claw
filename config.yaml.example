@@ -1,0 +1,60 @@
+# wechat-claw 基础设施配置（可选项）
+# 放置：~/.config/wechat-claw/config.yaml（Linux）/ %USERPROFILE%\.config\wechat-claw\config.yaml（Windows）
+# 不放置此文件 = 全部使用内置默认值，本文件即默认值的完整参考。
+# 说明：模块业务配置（城市/位置/vault 路径/时政目录等）不在本文件，属后续模块配置化范围。
+
+# 推送入口（bridge /push 服务）
+push:
+  host: 127.0.0.1
+  port: 9898
+  max_body_mb: 100          # body 上限，超限 413
+  retry_attempts: 3         # 模块推送重试次数
+  retry_interval: 3         # 重试间隔（秒）
+  timeout: 15               # 单次请求超时（秒）
+
+# 会话与权限
+session:
+  ttl_seconds: 18000        # 微信会话窗时长（5 小时 = 18000 秒）
+  perm_timeout_seconds: 30  # 高危操作微信确认超时（无回复默认拒绝）
+
+# 调度引擎
+scheduler:
+  run_timeout_seconds: 300  # 模块子进程超时保护（秒）
+  prune_days: 30            # 状态文件（防重/调度）修剪保留天数
+
+# 统一日志
+log:
+  rotate_mb: 1              # 日志轮转大小（MB）
+  backup_count: 2           # 保留历史份数
+
+# opencode 子进程
+acp:
+  command: opencode
+  port: 45678
+
+# 文件发送三级规则（_send_file 单点执行；default 直发 / 其余 gate 微信确认 / reject 硬拒）
+file_send:
+  default_dirs:
+    - ~/文档
+    - ~/下载
+    - ~/桌面
+    - ~/图片
+    - ~/音乐
+    - ~/视频
+    - ~/公共
+    - ~/wechat-claw/inbox
+  reject_dirs:
+    - ~/.config/wechat-claw
+    - ~/.ssh
+    - ~/.gnupg
+  reject_name_re: token|secret|credential|private|anniversaries\.json\.enc
+  reject_suffixes:
+    - .key
+    - .pem
+    - .p12
+    - .pfx
+    - .p8
+
+# 隐私数据密钥
+crypto:
+  key_file: ~/.config/wechat-claw/secret.key
