@@ -233,7 +233,7 @@ class BridgeCore:
         if stored:
             self._transport._client.token = stored
         if self._transport.needs_login:
-            log.critical("未登录，请先运行 wechat_login.py 扫码")
+            log.critical("未登录，请先完成登录（扫码流程见 docs/开发文档-03 A3）")
             raise SystemExit(1)  # 非零退出，systemd 可感知（配合 StartLimit 停止循环重启）
         await self._transport.connect()
         log.info("[weixin] 已连接 iLink")
@@ -303,7 +303,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except SessionExpiredError:
-        log.critical("微信登录 token 失效（SessionExpiredError），请重新运行 wechat_login.py 扫码")
+        log.critical("微信登录 token 失效（SessionExpiredError），请重新完成登录（扫码流程见 docs/开发文档-03 A3）")
         raise SystemExit(1)  # 非零退出 → systemd 停止重启循环（配合 StartLimitBurst）
     except KeyboardInterrupt:
         log.info("已停止")
