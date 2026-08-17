@@ -1,0 +1,30 @@
+# wechat-agent-sdk 0.2.1 锁定快照（vendor 分发用）
+# 说明：本目录为 SDK 全量源码快照（纯 Python），已预打生产必需 4 处补丁
+#   （cdn.py aes_key_b64 格式 B / transport.py file_size+len / cdn.py URL quote / import quote）。
+# 安装：pip install -e ./vendor/wechat_agent_sdk
+# 升级：替换本目录为 SDK 新版本源码后，重打 patches/apply_patches.py 对应补丁。
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wechat-agent-sdk"
+version = "0.2.1"
+description = "WeChat iLink bot SDK (vendored snapshot, patches pre-applied)"
+requires-python = ">=3.11"
+dependencies = [
+    "cryptography>=42.0",
+    "httpx>=0.27",
+    "agent-client-protocol>=0.8",
+]
+
+[tool.setuptools]
+packages = [
+    "wechat_agent_sdk",
+    "wechat_agent_sdk.account",
+    "wechat_agent_sdk.acp",
+    "wechat_agent_sdk.api",
+    "wechat_agent_sdk.media",
+    "wechat_agent_sdk.messaging",
+    "wechat_agent_sdk.utils",
+]
