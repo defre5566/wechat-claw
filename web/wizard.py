@@ -135,6 +135,8 @@ ROUTES = {
     ("POST", "/api/profile/locate"): _h("admin", "profile_locate", True),
     ("POST", "/api/profile/undo"): _h("admin", "profile_undo", True),
     ("POST", "/api/agents/render"): _h("admin", "agents_render", True),
+    ("POST", "/api/profile/avatar"): _h("admin", "avatar_set", True),
+    ("POST", "/api/profile/avatar/undo"): _h("admin", "avatar_undo", True),
     ("GET", "/api/admin/settings"): _h("admin", "settings_get", True),
     ("POST", "/api/admin/settings"): _h("admin", "settings_set", True),
     ("GET", "/api/admin/logs"): _h("admin", "logs_tail", True),
@@ -179,10 +181,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _file(self, path: Path, content_type: str) -> None:
-        data = path.read_bytes()
+        self._file_bytes(path.read_bytes(), content_type)
+
+    def _file_bytes(self, data: bytes, content_type: str) -> None:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
 
@@ -223,6 +228,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path in ("/wizard.html", "/admin.html", "/login.html"):
             self._serve_static(path.lstrip("/"))
+            return
+        if path == "/api/profile/avatar":
+            from web.handlers import admin
+            result = admin.avatar_get(APP)
+            if result is None:
+                self._json(404, {"ok": False, "error": "no avatar"})
+            else:
+                data, ctype = result
+                self._file_bytes(data, ctype)
             return
         route = ROUTES.get(("GET", path))
         if route is None:

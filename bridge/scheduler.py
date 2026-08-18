@@ -16,10 +16,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import get as get_cfg
-from modules.common.io import prune_state_file
 from modules.registry_index import build_index
 
-from .state import SCHED_STATE_FILE, load_sched_state, save_sched_state
+from .state import SCHED_STATE_FILE, load_sched_state, prune_state_file, save_sched_state
 
 log = logging.getLogger("wechat-bridge")
 

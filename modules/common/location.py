@@ -7,7 +7,8 @@
 - lat/lon：区级中心坐标（天气直接按坐标查，区级基准）
 
 GUI 经 set_city 写入（地区选择器选定 / 定位授权）；模块经 get_location 消费。
-无旧数据兼容：旧格式（无 code/lat/lon）读取时当未配置。
+旧数据兼容：旧格式（仅 city 英文名如 Jining）city 有值即正常返回，
+lat/lon 为空时天气层走 geocoding 兜底（英文名可查到）。
 """
 from __future__ import annotations
 

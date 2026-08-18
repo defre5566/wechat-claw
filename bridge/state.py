@@ -3,14 +3,18 @@
 - 推送 token：生成 / 读取（含 chmod 600）
 - retry 队列 / 调度状态：落盘读写
 - 会话状态：读取推送目标
+- prune_state_file：状态文件按日期键修剪（通用状态 IO，bridge 自持；
+  modules/common/io.py 薄包装 re-export，worker 骨架零破坏）
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import sys
 import time
+from datetime import date, timedelta
 from pathlib import Path
 
 from .config import get as get_cfg
@@ -25,6 +29,74 @@ RETRY_FILE = SDK_DIR / "retry_queue.json"
 
 SESSION_TTL_SECONDS = get_cfg("session.ttl_seconds")         # 5 小时会话窗（可配）
 PERM_TIMEOUT_SECONDS = get_cfg("session.perm_timeout_seconds")  # 权限确认超时（默认拒绝）
+
+_DATE_PREFIX = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+
+def _load_json_file(path: Path) -> dict:
+    try:
+        if path.is_file():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[state] 读文件失败 {path}: {e}", file=sys.stderr)
+    return {}
+
+
+def _save_json_file(path: Path, data: dict) -> bool:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return True
+    except Exception as e:
+        print(f"[state] 写文件失败 {path}: {e}", file=sys.stderr)
+        return False
+
+
+def prune_state_file(path: Path, days: int | None = None) -> None:
+    """修剪防重/状态文件：仅保留最近 days 天键（递归，支持嵌套状态对象）。
+
+    - 日期开头键：按 ISO 日期比较
+    - 非日期键：值为 epoch 时间戳且早于 cutoff → 过期删除（如遗留的 ts 键）；
+      last_ts（值实时）、_off 偏移缓存（分钟数）、字符串值一律保留
+    """
+    if days is None:
+        days = get_cfg("scheduler.prune_days")
+    data = _load_json_file(path)
+    if not data:
+        return
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    cutoff_ts = time.time() - days * 86400
+    keep = _prune_dict(data, cutoff, cutoff_ts)
+    if len(keep) != len(data):
+        _save_json_file(path, keep)
+
+
+def _prune_dict(data: dict, cutoff: str, cutoff_ts: float) -> dict:
+    out: dict = {}
+    for k, v in data.items():
+        if not _keep_key(k, cutoff):
+            continue
+        if isinstance(v, dict):
+            out[k] = _prune_dict(v, cutoff, cutoff_ts)
+        elif not _keep_ts_key(v, cutoff_ts):
+            continue
+        else:
+            out[k] = v
+    return out
+
+
+def _keep_key(key: str, cutoff: str) -> bool:
+    m = _DATE_PREFIX.match(key)
+    if not m:
+        return True  # 非日期键由 _keep_ts_key 判定
+    return m.group(1) >= cutoff
+
+
+def _keep_ts_key(value, cutoff_ts: float) -> bool:
+    """非日期键保留规则：epoch 时间戳（≥1e9）且早于 cutoff → 过期删除。"""
+    if isinstance(value, (int, float)) and value >= 1e9:
+        return value >= cutoff_ts
+    return True
 
 
 def load_or_create_token() -> str:

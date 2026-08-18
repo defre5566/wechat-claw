@@ -797,12 +797,27 @@
     }
   });
 
-  /* 头像上传（demo：FileReader → 两处头像替换，撤销恢复） */
+  /* 头像：真实后端（.config/avatar.png） */
   var avatarFile = document.getElementById("avatarFile");
   var topAvatar = document.getElementById("topAvatar");
   var profileAvatar = document.getElementById("profileAvatar");
   var avatarUndo = document.getElementById("avatarUndo");
-  var prevAvatar = "";
+
+  function applyAvatar(url) {
+    topAvatar.style.backgroundImage = "url(" + url + ")";
+    profileAvatar.style.backgroundImage = "url(" + url + ")";
+    topAvatar.classList.add("has-img");
+    profileAvatar.classList.add("has-img");
+  }
+  /* 加载：有头像则显示 */
+  fetch("/api/profile/avatar").then(function (r) {
+    if (!r.ok) throw new Error("no");
+    return r.blob();
+  }).then(function (blob) {
+    var reader = new FileReader();
+    reader.onload = function (e) { applyAvatar(e.target.result); };
+    reader.readAsDataURL(blob);
+  }).catch(function () {});
 
   document.getElementById("uploadAvatarBtn").addEventListener("click", function () {
     avatarFile.click();
@@ -812,25 +827,16 @@
     if (!f) return;
     var reader = new FileReader();
     reader.onload = function (e) {
-      prevAvatar = topAvatar.style.backgroundImage;
-      topAvatar.style.backgroundImage = "url(" + e.target.result + ")";
-      profileAvatar.style.backgroundImage = "url(" + e.target.result + ")";
-      topAvatar.classList.add("has-img");
-      profileAvatar.classList.add("has-img");
+      api.post("/api/profile/avatar", { data: e.target.result }).then(function () {
+        applyAvatar(e.target.result);
+      }).catch(function (err) { alert(err.message); });
     };
     reader.readAsDataURL(f);
   });
   avatarUndo.addEventListener("click", function () {
-    if (prevAvatar) {
-      topAvatar.style.backgroundImage = prevAvatar;
-      profileAvatar.style.backgroundImage = prevAvatar;
-    } else {
-      topAvatar.style.backgroundImage = "";
-      profileAvatar.style.backgroundImage = "";
-      topAvatar.classList.remove("has-img");
-      profileAvatar.classList.remove("has-img");
-    }
-    prevAvatar = "";
+    api.post("/api/profile/avatar/undo").then(function () {
+      location.reload();
+    }).catch(function (err) { alert(err.message); });
   });
 
   /* opencode 优化（demo：占位） */

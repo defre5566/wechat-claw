@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import base64
 import json
 import math
 
@@ -13,6 +14,10 @@ from modules.registry_index import build_index
 from web import agent_gen, auth
 
 CITIES_PATH = PROJECT_ROOT / "web" / "static" / "cities.json"
+
+AVATAR_FILE = PROJECT_ROOT / ".config" / "avatar.png"
+AVATAR_PREV = PROJECT_ROOT / ".config" / "avatar.prev.png"
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
 _cities_cache: list | None = None
 
 
@@ -134,6 +139,47 @@ def profile_locate(app, body: dict | None = None) -> dict:
     _code, name, _parent, pinyin, clat, clon = row
     set_city(name, pinyin or "", clat, clon, _code)
     return {"ok": True, "code": _code, "name": name, "city": get_location()}
+
+
+def avatar_set(app, body: dict | None = None) -> dict:
+    """上传头像：base64 data URL → .config/avatar.png（写前备份 prev 供撤销）。"""
+    data_url = (body or {}).get("data", "")
+    if not data_url.startswith("data:image/"):
+        return {"ok": False, "error": "无效图片数据"}, 400
+    try:
+        raw = base64.b64decode(data_url.split(",", 1)[1])
+    except Exception:
+        return {"ok": False, "error": "图片解码失败"}, 400
+    if len(raw) > MAX_AVATAR_BYTES:
+        return {"ok": False, "error": "图片超过 2MB"}, 413
+    try:
+        AVATAR_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if AVATAR_FILE.is_file():
+            AVATAR_PREV.write_bytes(AVATAR_FILE.read_bytes())
+        AVATAR_FILE.write_bytes(raw)
+        return {"ok": True, "size": len(raw)}
+    except OSError as e:
+        return {"ok": False, "error": str(e)}, 500
+
+
+def avatar_get(app, body: dict | None = None):
+    """返回头像字节与类型；不存在返回 None（wizard 按 404 处理）。"""
+    if AVATAR_FILE.is_file():
+        return AVATAR_FILE.read_bytes(), "image/png"
+    return None
+
+
+def avatar_undo(app, body: dict | None = None) -> dict:
+    """撤销头像：有 prev 换回；无 prev 删除（回默认图标）。"""
+    try:
+        if AVATAR_PREV.is_file():
+            AVATAR_FILE.write_bytes(AVATAR_PREV.read_bytes())
+            AVATAR_PREV.unlink(missing_ok=True)
+        else:
+            AVATAR_FILE.unlink(missing_ok=True)
+        return {"ok": True}
+    except OSError as e:
+        return {"ok": False, "error": str(e)}, 500
 
 
 def profile_undo(app, body: dict | None = None) -> dict:

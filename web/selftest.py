@@ -21,7 +21,7 @@ PY = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python"
 
 
 def _req(port: int, method: str, path: str, body: dict | None = None,
-         token: str = "") -> tuple[int, dict]:
+         token: str = "", raw: bool = False) -> tuple[int, dict | bytes]:
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}{path}",
@@ -32,9 +32,14 @@ def _req(port: int, method: str, path: str, body: dict | None = None,
         req.add_header("X-Auth", token)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
+            data = resp.read()
+            if raw:
+                return resp.status, data
+            return resp.status, json.loads(data.decode("utf-8"))
     except urllib.error.HTTPError as e:
         try:
+            if raw:
+                return e.code, e.read()
             return e.code, json.loads(e.read().decode("utf-8"))
         except Exception:
             return e.code, {}
@@ -130,6 +135,16 @@ def main() -> int:
             checks.append(("profile_locate_bad", st == 400))
             st, d = _req(port, "POST", "/api/agents/render", token=token)
             checks.append(("agents_render", st == 200 and d.get("ok")))
+
+            # 头像：上传（1x1 PNG base64）→ 读取 → 撤销
+            png = ("data:image/png;base64," +
+                   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+            st, d = _req(port, "POST", "/api/profile/avatar", {"data": png}, token=token)
+            checks.append(("avatar_set", st == 200 and d.get("ok")))
+            st, _ = _req(port, "GET", "/api/profile/avatar", token=token, raw=True)
+            checks.append(("avatar_get", st == 200))
+            st, d = _req(port, "POST", "/api/profile/avatar/undo", token=token)
+            checks.append(("avatar_undo", st == 200 and d.get("ok")))
 
             # 汇总
             failed = [name for name, ok in checks if not ok]

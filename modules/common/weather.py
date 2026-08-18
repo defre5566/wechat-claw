@@ -4,7 +4,9 @@
 - get_weather：带 TTL 缓存的天气（跨模块共享，默认 30 分钟）
 
 天气城市优先级：location.json 坐标（区级基准，选定/定位时写入）
-→ geocoding 中文名 → 拼音（en）兜底 → 回退 DEFAULT_LOC（北京）。
+→ city 名 geocoding（兼容旧版英文名数据如 Jining；新版为中文名，
+  Open-Meteo 中文支持有限常查不到，失败即落 en 分支）→ 拼音 en 兜底
+→ 回退 DEFAULT_LOC（北京）。
 """
 from __future__ import annotations
 
@@ -61,7 +63,7 @@ def _weather_at(lat: float, lon: float, name: str) -> str:
 
 
 def fetch_weather() -> str:
-    """按用户位置查天气。优先级：坐标 → geocoding（中文名 → 拼音）→ 回退北京。"""
+    """按用户位置查天气。优先级：坐标 → geocoding（city 名/兼容旧英文 → en 拼音）→ 回退北京。"""
     loc = get_location()
     lat, lon = loc.get("lat"), loc.get("lon")
     name = str(loc.get("city", "")) or "北京"
@@ -69,7 +71,7 @@ def fetch_weather() -> str:
     if lat is not None and lon is not None:
         return _weather_at(lat, lon, name)
 
-    # 无坐标（未配置/选定失败）：geocoding 中文名 → 拼音（en）→ 回退默认
+    # 无坐标（未配置/选定失败）：geocoding city 名（旧数据英文名可直接查到）→ en 拼音 → 回退默认
     for query in (loc.get("city"), loc.get("en")):
         if not query:
             continue
