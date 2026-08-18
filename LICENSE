@@ -36,3 +36,10 @@ wechat-bridge as a Windows service. NSSM is public domain ("You may
 unconditionally use it and/or its source code for any purpose you wish");
 the binaries are distributed for convenience of Windows deployment and are
 NOT covered by the copyright notice above.
+
+The file `web/static/cities.json` contains administrative-division data
+(provinces/cities/counties with pinyin names and coordinates) derived from
+`xiangyuecn/AreaCity-JsSpider-StatsGov` (https://github.com/xiangyuecn/AreaCity-JsSpider-StatsGov,
+MIT license, data as of 2026-04-03, sourced from official statistics).
+The data is distributed under its MIT license and is NOT covered by the
+copyright notice above.
