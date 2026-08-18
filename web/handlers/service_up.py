@@ -20,6 +20,12 @@ SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 
 def _write_and_run(path: Path, content: str, commands: list[list[str]]) -> list[dict]:
     steps = []
+    if SELFTEST:
+        # 服务隔离：不写真实文件、不执行命令，仅输出将执行的内容
+        steps.append({"cmd": f"（selftest）将写入 {path}", "ok": True, "dry": True})
+        for cmd in commands:
+            steps.append({"cmd": " ".join(shlex.quote(c) for c in cmd), "ok": True, "dry": True})
+        return steps
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -27,9 +33,6 @@ def _write_and_run(path: Path, content: str, commands: list[list[str]]) -> list[
     else:
         steps.append({"cmd": f"已存在 {path}", "ok": True})
     for cmd in commands:
-        if SELFTEST:
-            steps.append({"cmd": " ".join(shlex.quote(c) for c in cmd), "ok": True, "dry": True})
-            continue
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             steps.append({
