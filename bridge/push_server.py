@@ -12,7 +12,7 @@ import json
 import logging
 import threading
 
-from modules.common.config import get
+from .config import get
 from modules.registry_index import build_index
 
 from .state import load_or_create_token

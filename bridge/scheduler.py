@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from modules.common.config import get as get_cfg
+from .config import get as get_cfg
 from modules.common.io import prune_state_file
 from modules.registry_index import build_index
 
@@ -23,7 +23,7 @@ from .state import SCHED_STATE_FILE, load_sched_state, save_sched_state
 
 log = logging.getLogger("wechat-bridge")
 
-MODULES_DIR = Path.home() / "wechat-claw" / "modules"
+MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"  # 与 registry_index 一致（相对定位）
 RUN_TIMEOUT = get_cfg("scheduler.run_timeout_seconds")  # 模块子进程超时保护（秒）
 
 
@@ -119,8 +119,8 @@ def _rule_id(rule: dict, name: str, idx: int) -> str:
 
 
 async def scheduler() -> None:
-    """主循环：启动补发一次，此后每分钟 tick。"""
-    await _tick(force=True)
+    """主循环：启动立即 tick 一次，此后每分钟 tick。"""
+    await _tick()
     while True:
         now = datetime.now()
         nxt = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
@@ -128,7 +128,7 @@ async def scheduler() -> None:
         await _tick()
 
 
-async def _tick(force: bool = False) -> None:
+async def _tick() -> None:
     index = build_index()
     prune_state_file(SCHED_STATE_FILE)  # 修剪过期窗口键（30 天）
     state = load_sched_state()
@@ -146,15 +146,41 @@ async def _tick(force: bool = False) -> None:
             mod_state = state.setdefault(name, {})
 
             # ---- every 规则 ----
+            # 周期触发 + 失败补发：失败按 retry 配置补发（≤max 次、间隔 retry_iv，补发窗口内
+            # 只走 retry 判定，不按周期重复触发）；未配置补发或已超次 → 清除失败记录并推进
+            # last_ts 等下个周期，避免每分钟失败风暴与失败计数无限增长。
             if "every" in rule:
-                last = mod_state.get("last_ts", 0)
-                if now.timestamp() - last >= every_interval(rule["every"]):
-                    rc = await run_module(name)
-                    if rc == 0:
-                        mod_state["last_ts"] = now.timestamp()
-                        changed = True
+                interval = every_interval(rule["every"])
+                failed = mod_state.get(f"{rid}_failed")
+                if failed and failed.get("count", 0) > max_retry:
+                    # 历史遗留/已超次记录：清除后回退周期判定
+                    mod_state.pop(f"{rid}_failed", None)
+                    failed = None
+                    changed = True
+                if failed:
+                    due = (
+                        failed.get("count", 0) <= max_retry
+                        and now.timestamp() - failed.get("ts", 0) >= retry_iv
+                    )
+                    if not due:
+                        continue
+                elif now.timestamp() - mod_state.get("last_ts", 0) < interval:
+                    continue
+                rc = await run_module(name)
+                if rc == 0:
+                    mod_state["last_ts"] = now.timestamp()
+                    mod_state.pop(f"{rid}_failed", None)
+                    log.info(f"[sched] {name}[{rid}] 完成（every {rule['every']}）")
+                else:
+                    cnt = failed.get("count", 0) + 1 if failed else 1
+                    if max_retry and cnt <= max_retry:
+                        mod_state[f"{rid}_failed"] = {"ts": now.timestamp(), "count": cnt}
+                        log.warning(f"[sched] {name}[{rid}] 失败 rc={rc}（补发 {cnt}/{max_retry}）")
                     else:
-                        _log_fail(name, rid, rc)
+                        mod_state.pop(f"{rid}_failed", None)
+                        mod_state["last_ts"] = now.timestamp()
+                        log.warning(f"[sched] {name}[{rid}] 失败 rc={rc}（未配置补发/已超次，下个周期再试）")
+                changed = True
                 continue
 
             # ---- window 规则（小时窗口 + 随机偏移，严格版：首 tick 定偏移缓存）----

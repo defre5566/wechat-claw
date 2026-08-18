@@ -9,7 +9,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from .config import get
+from bridge.config import get
 
 WORKDIR = Path(__file__).resolve().parent.parent.parent
 LOG_DIR = WORKDIR / "logs"

@@ -149,7 +149,10 @@ class SessionManager:
     def _load(self):
         try:
             if SESSION_STATE_FILE.exists():
-                self._last_active = json.loads(SESSION_STATE_FILE.read_text())
+                data = json.loads(SESSION_STATE_FILE.read_text())
+                # 防御：文件被截断/写坏时可能得到 null/list 等非 dict，回退空状态
+                if isinstance(data, dict):
+                    self._last_active = data
         except Exception as e:
             log.warning(f"会话状态加载失败: {e}")
 

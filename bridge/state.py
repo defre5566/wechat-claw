@@ -13,9 +13,9 @@ import sys
 import time
 from pathlib import Path
 
-from modules.common.config import get as get_cfg
+from .config import get as get_cfg
 
-WORKDIR = Path.home() / "wechat-claw"
+WORKDIR = Path(__file__).resolve().parent.parent  # 项目根（相对定位，任意目录部署自洽）
 ARCHIVE_DIR = WORKDIR / "_archive"
 SDK_DIR = WORKDIR / "agent-SDK"
 TOKEN_FILE = SDK_DIR / "push_token"
@@ -83,7 +83,8 @@ def target_conversation_ids() -> list[str]:
     try:
         if SESSION_STATE_FILE.exists():
             data = json.loads(SESSION_STATE_FILE.read_text())
-            return [k for k in data if isinstance(k, str) and k]
+            if isinstance(data, dict):
+                return [k for k in data if isinstance(k, str) and k]
     except Exception as e:
         print(f"[push] 读取会话状态失败: {e}", file=sys.stderr)
     return []
@@ -95,6 +96,8 @@ def targets_for_text(text: str) -> tuple[str, str]:
         data = {}
         if SESSION_STATE_FILE.exists():
             data = json.loads(SESSION_STATE_FILE.read_text())
+            if not isinstance(data, dict):
+                data = {}
     except Exception:
         data = {}
     if not data:

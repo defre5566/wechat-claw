@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>wechat-claw 管理后台</title>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+
+<div class="admin">
+
+  <!-- 悬浮侧边栏（固定垂直居中，与左缘留距） -->
+  <aside class="admin-sidebar">
+    <div class="admin-logo">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+      </svg>
+      wechat-claw
+    </div>
+
+    <div class="nav-item active" data-page="basic">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      基础设置
+    </div>
+    <div class="nav-item nav-item-long" data-page="user">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      用户与助理
+    </div>
+    <div class="nav-item" data-page="modules">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4-6.2-4.5-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+      模块管理
+    </div>
+  </aside>
+
+  <!-- 主内容区 -->
+  <main class="admin-main">
+    <div class="content-frame">
+
+      <div class="admin-topbar">
+        <div class="page-title" id="pageTitle">基础设置</div>
+        <div class="admin-user">
+          <button class="btn btn-secondary btn-sm" id="advBtn">高级设置</button>
+          <span class="avatar" title="管理员" id="topAvatar">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </span>
+        </div>
+      </div>
+
+      <!-- ============ 基础设置 ============ -->
+      <div class="admin-page" data-page="basic">
+
+        <div class="card">
+          <h3>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+            运行状态
+          </h3>
+          <div class="status-grid">
+            <div class="status-cell acp">
+              <div class="status-head"><span class="status-dot ok"></span><span class="status-name">ACP 服务</span></div>
+              <div class="status-value">运行中 · v1.18.18 · 已运行 3 天</div>
+            </div>
+            <div class="status-cell send">
+              <div class="send-num">12</div>
+              <div class="send-label">今日发送</div>
+            </div>
+            <div class="status-cell">
+              <div class="status-head"><span class="status-dot ok"></span><span class="status-name">模块服务</span></div>
+              <div class="status-value">3 个运行中 · 1 个已禁用</div>
+            </div>
+            <div class="status-cell">
+              <div class="status-head"><span class="status-dot ok"></span><span class="status-name">微信连接</span></div>
+              <div class="status-value">已连接 · 会话正常</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4-6.2-4.5-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+            常规
+          </h3>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <div class="setting-title">开机自启动</div>
+              <div class="setting-hint">开机自动启动 bridge 服务 · Linux systemd 用户服务</div>
+            </div>
+            <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <div class="setting-title">界面主题</div>
+              <div class="setting-hint">切换全局配色，立即生效并记住选择</div>
+            </div>
+            <div class="theme-dots">
+              <button class="theme-dot light" data-theme="light" title="浅色"></button>
+              <button class="theme-dot dark" data-theme="dark" title="深色"></button>
+              <button class="theme-dot green" data-theme="green" title="护眼绿"></button>
+              <button class="theme-dot system" data-theme="system" title="跟随系统"></button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-text">
+              <div class="setting-title">运行日志</div>
+              <div class="setting-hint">查看系统运行日志（logs/system.log）</div>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="logBtn">查看</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ============ 用户与助理 ============ -->
+      <div class="admin-page" data-page="user" style="display:none">
+
+        <div class="card">
+          <h3>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            助理人设
+          </h3>
+          <div class="sub">保存后生成 AGENTS.md，opencode 下次启动自动加载</div>
+
+          <div class="form-inline">
+            <label>称呼（对您的称呼）</label>
+            <input type="text" value="鑫">
+            <button class="btn btn-primary btn-sm">保存</button>
+            <button class="undo-btn">撤销</button>
+          </div>
+
+          <div class="form-inline">
+            <label>对助理的称呼</label>
+            <input type="text" value="小助手">
+            <button class="btn btn-primary btn-sm">保存</button>
+            <button class="undo-btn">撤销</button>
+          </div>
+
+          <div class="form-inline">
+            <label>角色设定</label>
+            <textarea rows="4" placeholder="描述你希望助理是什么样的人。例如：&#10;我的个人数字助理，负责日程提醒、信息整理、主动关怀；可靠、不打扰；复杂任务先跟我确认再做。&#10;&#10;写得简单也没关系，点右侧「优化」让我帮你扩写成完整人设。"></textarea>
+          </div>
+          <div class="field-actions">
+            <button class="btn btn-secondary btn-sm" id="opencodeRun">优化</button>
+            <button class="btn btn-primary btn-sm">保存</button>
+            <button class="undo-btn">撤销</button>
+          </div>
+
+          <div class="form-inline">
+            <label>语言习惯</label>
+            <textarea rows="3" placeholder="描述你希望助理怎么说话。例如：&#10;口语自然、不端不客套；先结论后细节，密度优先不灌水；不确定就明说，不糊弄；不过度打扰、不刷屏。"></textarea>
+          </div>
+          <div class="field-actions">
+            <button class="btn btn-primary btn-sm">保存</button>
+            <button class="undo-btn">撤销</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            用户信息
+          </h3>
+
+          <div class="form-inline">
+            <label>头像</label>
+            <div style="flex:1;display:flex;align-items:center;gap:14px">
+              <span class="avatar avatar-lg" id="profileAvatar">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              </span>
+              <button class="btn btn-secondary btn-sm" id="uploadAvatarBtn">上传头像</button>
+              <input type="file" accept="image/*" hidden id="avatarFile">
+              <button class="undo-btn" id="avatarUndo">撤销</button>
+            </div>
+          </div>
+
+          <div class="form-inline">
+            <label>所在城市</label>
+            <select id="citySelect">
+              <option value="">— 请选择城市 —</option>
+              <option value="Beijing">北京</option>
+              <option value="Shanghai">上海</option>
+              <option value="Guangzhou">广州</option>
+              <option value="Shenzhen">深圳</option>
+              <option value="Hangzhou">杭州</option>
+              <option value="Chengdu">成都</option>
+              <option value="Chongqing">重庆</option>
+              <option value="Wuhan">武汉</option>
+              <option value="Xian">西安</option>
+              <option value="Nanjing">南京</option>
+              <option value="Tianjin">天津</option>
+              <option value="Suzhou">苏州</option>
+              <option value="Zhengzhou">郑州</option>
+              <option value="Changsha">长沙</option>
+              <option value="Qingdao">青岛</option>
+              <option value="Shenyang">沈阳</option>
+              <option value="Ningbo">宁波</option>
+              <option value="Kunming">昆明</option>
+              <option value="Dalian">大连</option>
+              <option value="Xiamen">厦门</option>
+              <option value="Hefei">合肥</option>
+              <option value="Fuzhou">福州</option>
+              <option value="Harbin">哈尔滨</option>
+              <option value="Jinan">济南</option>
+              <option value="Wuxi">无锡</option>
+              <option value="Changchun">长春</option>
+              <option value="Wenzhou">温州</option>
+              <option value="Shijiazhuang">石家庄</option>
+              <option value="Nanning">南宁</option>
+              <option value="Guiyang">贵阳</option>
+              <option value="Nanchang">南昌</option>
+              <option value="Taiyuan">太原</option>
+              <option value="Xiaodian">太原小店区</option>
+              <option value="Jining" selected>集宁（乌兰察布）</option>
+              <option value="Hohhot">呼和浩特</option>
+              <option value="Lanzhou">兰州</option>
+              <option value="Urumqi">乌鲁木齐</option>
+              <option value="Haikou">海口</option>
+              <option value="Yinchuan">银川</option>
+              <option value="Xining">西宁</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" id="locateBtn">📍 定位授权</button>
+          </div>
+
+          <div class="form-inline" style="margin-top:18px">
+            <label>兴趣爱好</label>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;gap:10px;align-items:center">
+                <input type="text" placeholder="输入一个兴趣爱好，回车添加…" style="flex:1" id="habitInput">
+                <button class="btn btn-primary btn-sm">保存</button>
+                <button class="undo-btn">撤销</button>
+              </div>
+              <div class="tag-list" style="margin-top:10px">
+                <span class="tag">喜欢喝茶 <span class="x">✕</span></span>
+                <span class="tag">关注时政 <span class="x">✕</span></span>
+                <span class="tag">夜跑 <span class="x">✕</span></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-inline" style="margin-top:18px">
+            <label>生活习惯</label>
+            <textarea rows="6" placeholder="描述你真实的生活节奏与偏好，模块会据此在合适时段做关怀。例如：&#10;作息规律，工作日 7 点起、23 点半睡，周末会晚一些；习惯午休半小时；不喝咖啡；喜欢夜跑；秋季花粉过敏（8-9 月）。&#10;&#10;写得越具体，关怀越贴切；不确定的可以留空。"></textarea>
+          </div>
+          <div class="field-actions">
+            <button class="btn btn-primary btn-sm">保存</button>
+            <button class="undo-btn">撤销</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ============ 模块管理 ============ -->
+      <div class="admin-page" data-page="modules" style="display:none">
+
+        <!-- 模块源 -->
+        <div class="card">
+          <div class="card-head">
+            <h3>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/></svg>
+              模块源
+            </h3>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-primary btn-sm" id="addSourceBtn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                添加源
+              </button>
+              <button class="btn btn-secondary btn-sm" id="sourceMgrBtn" data-label="管理源">管理源</button>
+            </div>
+          </div>
+
+          <div id="sourceList">
+            <div class="module-item">
+              <div class="module-info">
+                <div class="module-name">官方模块库</div>
+                <div class="module-desc">github.com/wechat-claw/modules · 内置源，不可删除</div>
+              </div>
+              <button class="icon-btn" title="模块源设置">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>
+              </button>
+              <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+            </div>
+
+            <div class="module-item">
+              <div class="module-info">
+                <div class="module-name">本地开发目录</div>
+                <div class="module-desc">~/dev/wechat-modules · 本地源</div>
+              </div>
+              <button class="icon-btn" title="模块源设置">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>
+              </button>
+              <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+              <button class="btn btn-danger btn-sm module-del" hidden>删除</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 模块 -->
+        <div class="card">
+          <div class="card-head">
+            <h3>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4-6.2-4.5-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+              模块
+            </h3>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-primary btn-sm" id="addModuleBtn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                添加模块
+              </button>
+              <button class="btn btn-secondary btn-sm" id="mgrBtn" data-label="管理">管理</button>
+            </div>
+          </div>
+
+        <div id="moduleList">
+        <div class="module-item">
+          <div class="module-info">
+            <div class="module-name">todo</div>
+            <div class="module-desc">待办提醒：扫描 vault 待办，按触发时间推送微信提醒</div>
+            <div class="mod-src">官方模块库</div>
+          </div>
+          <div class="module-actions">
+<button class="icon-btn module-gear" title="模块设置">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>
+          </button>
+          <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+            <button class="btn btn-danger btn-sm module-del" hidden>删除</button>
+          </div>
+        </div>
+
+        <div class="module-item">
+          <div class="module-info">
+            <div class="module-name">planner</div>
+            <div class="module-desc">早晚报：按时政、天气、待办生成晨报与晚报推送</div>
+            <div class="mod-src">官方模块库</div>
+          </div>
+          <div class="module-actions">
+<button class="icon-btn module-gear" title="模块设置">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>
+          </button>
+          <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+            <button class="btn btn-danger btn-sm module-del" hidden>删除</button>
+          </div>
+        </div>
+
+        <div class="module-item">
+          <div class="module-info">
+            <div class="module-name">emotion</div>
+            <div class="module-desc">时段关怀：按作息与天气在合适时段推送关心</div>
+            <div class="mod-src">官方模块库</div>
+          </div>
+          <div class="module-actions">
+<button class="icon-btn module-gear" title="模块设置">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>
+          </button>
+          <label class="switch"><input type="checkbox"><span class="slider"></span></label>
+            <button class="btn btn-danger btn-sm module-del" hidden>删除</button>
+          </div>
+        </div>
+
+        <div class="module-item" data-src="local">
+          <div class="module-info">
+            <div class="module-name">weather</div>
+            <div class="module-desc">天气与花粉：按城市推送天气与花粉提醒</div>
+            <div class="mod-src">本地开发目录</div>
+          </div>
+          <div class="module-actions">
+<button class="icon-btn module-gear" title="模块设置">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>
+          </button>
+          <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+            <button class="btn btn-danger btn-sm module-del" hidden>隐藏</button>
+          </div>
+        </div>
+        </div><!-- moduleList end -->
+
+        </div><!-- 模块卡片 end -->
+
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<!-- ============ 高级设置弹窗 ============ -->
+<div class="modal-overlay" id="advModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>高级设置</h3>
+      <button class="modal-close" data-close="advModal">✕</button>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">运行配置</div>
+
+      <div class="form-row">
+        <label>opencode 命令路径</label>
+        <input type="text" value="opencode">
+        <div class="form-hint">默认为 PATH 中的 opencode；自定义安装可填绝对路径</div>
+      </div>
+      <div class="form-row">
+        <label>ACP 端口</label>
+        <input type="number" value="45678">
+        <div class="form-hint">opencode 子进程端口（固定，避免与 4096/8650/9898 冲突）</div>
+      </div>
+      <div class="form-row">
+        <label>文件直发目录</label>
+        <textarea rows="3" style="width:100%">~/文档
+~/下载
+~/桌面
+~/图片
+~/音乐
+~/视频
+~/公共</textarea>
+        <div class="form-hint">每行一个目录；这些目录下的文件微信发送免确认</div>
+      </div>
+      <div class="form-row">
+        <label>加密密钥路径</label>
+        <input type="text" value=".config/crypto.key" readonly class="input-readonly">
+        <div class="form-hint">只读：密钥自动生成，丢失将无法解密已加密的隐私数据</div>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">助理人设</div>
+      <div class="form-row">
+        <label>行为守则</label>
+        <div class="tag-list" style="margin-bottom:10px">
+          <span class="tag">先结论后细节 <span class="x">✕</span></span>
+          <span class="tag">复杂任务分步确认 <span class="x">✕</span></span>
+          <span class="tag">不过度打扰 <span class="x">✕</span></span>
+          <span class="tag">不确定就明说 <span class="x">✕</span></span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <input type="text" placeholder="添加一条守则…" style="flex:1">
+          <button class="btn btn-secondary btn-sm">添加</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">安全</div>
+      <div class="form-row">
+        <label>管理密码</label>
+        <input type="password" placeholder="当前密码">
+      </div>
+      <div class="form-row">
+        <label>新密码</label>
+        <input type="password" placeholder="留空则不修改">
+      </div>
+      <div class="form-row">
+        <label>确认新密码</label>
+        <input type="password" placeholder="再次输入新密码">
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px">
+      <button class="btn btn-secondary" data-close="advModal">取消</button>
+      <button class="btn btn-primary" data-close="advModal">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 日志弹窗 ============ -->
+<div class="modal-overlay" id="logModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>运行日志</h3>
+      <button class="modal-close" data-close="logModal">✕</button>
+    </div>
+    <div class="log-console" style="max-height:320px"><span class="ok">02:11:23 [info]</span> [push] HTTP 入口 http://127.0.0.1:9898/push
+<span class="ok">02:11:23 [info]</span> 微信桥接 v2 启动（5h 会话窗 / 串行 / 微信确认权限）
+<span class="ok">02:12:01 [info]</span> [weixin] 已连接 iLink
+<span class="ok">02:12:01 [info]</span> [acp] Connection initialized (wechat-confirm mode)
+<span class="ok">02:15:40 [info]</span> [sched] todo[m|0] 完成（every 1m）
+<span class="warn">02:17:12 [warn]</span> [push] 鉴权失败 ip=127.0.0.1 token=ab12****
+<span class="ok">02:30:00 [info]</span> [sched] planner[morning] 完成
+<span class="err">02:31:05 [error]</span> [media] 接收失败: timeout</div>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px">
+      <button class="btn btn-secondary btn-sm" data-close="logModal">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 添加模块源弹窗 ============ -->
+<div class="modal-overlay" id="addSourceModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>添加模块源</h3>
+      <button class="modal-close" data-close="addSourceModal">✕</button>
+    </div>
+    <p class="modal-desc">模块源是模块的存放来源，添加后即可在「添加模块」时选用。</p>
+
+    <div class="seg" id="sourceTypeSeg">
+      <button class="seg-btn active" data-type="github">GitHub 仓库</button>
+      <button class="seg-btn" data-type="local">本地目录</button>
+    </div>
+
+    <div class="form-row" id="sourceGithubRow">
+      <label>GitHub 仓库链接</label>
+      <input type="text" placeholder="https://github.com/用户名/仓库名" id="sourceUrl">
+    </div>
+    <div class="form-row" id="sourceLocalRow" style="display:none">
+      <label>本地目录路径</label>
+      <div style="display:flex;gap:8px">
+        <input type="text" placeholder="如 ~/dev/wechat-modules" id="sourcePath" style="flex:1">
+        <button class="btn btn-secondary btn-sm">选择目录…</button>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:10px">
+      <button class="btn btn-secondary" data-close="addSourceModal">取消</button>
+      <button class="btn btn-primary" id="addSourceConfirm">添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 添加模块弹窗 ============ -->
+<div class="modal-overlay" id="addModal">
+  <div class="modal modal-lg">
+    <div class="modal-head">
+      <h3>添加模块</h3>
+      <button class="modal-close" data-close="addModal">✕</button>
+    </div>
+    <p class="modal-desc">从模块源选择要安装的模块（点选可多选）：</p>
+    <div class="mod-grid" id="modGrid">
+      <div class="mod-card" data-name="todo">
+        <div class="mod-name">todo</div>
+        <div class="mod-desc">待办提醒：扫描 vault 待办按触发时间推送</div>
+        <div class="mod-src">官方模块库</div>
+      </div>
+      <div class="mod-card" data-name="planner">
+        <div class="mod-name">planner</div>
+        <div class="mod-desc">早晚报：按时政、天气、待办生成晨报晚报</div>
+        <div class="mod-src">官方模块库</div>
+      </div>
+      <div class="mod-card" data-name="emotion">
+        <div class="mod-name">emotion</div>
+        <div class="mod-desc">时段关怀：按作息与天气推送关心</div>
+        <div class="mod-src">官方模块库</div>
+      </div>
+      <div class="mod-card" data-name="weather">
+        <div class="mod-name">weather</div>
+        <div class="mod-desc">天气与花粉：按城市推送天气与花粉提醒</div>
+        <div class="mod-src">本地开发目录</div>
+      </div>
+      <div class="mod-card" data-name="my-mod">
+        <div class="mod-name">my-mod</div>
+        <div class="mod-desc">自定义测试模块（示例）</div>
+        <div class="mod-src">本地开发目录</div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:10px">
+      <button class="btn btn-secondary" data-close="addModal">取消</button>
+      <button class="btn btn-primary" id="modInstall" data-close="addModal">安装所选（0）</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 管理弹窗 ============ -->
+
+
+<!-- ============ 模块设置弹窗（planner 示例） ============ -->
+<div class="modal-overlay" id="moduleModal">
+  <div class="modal modal-lg modal-fixed">
+    <div class="modal-head">
+      <h3>planner-设置</h3>
+      <button class="modal-close" data-close="moduleModal">✕</button>
+    </div>
+
+    <div class="modal-body">
+    <div class="form-row">
+      <label>用途</label>
+      <input type="text" value="晨间早报+晚间复盘（天气/待办/逾期/里程碑/时政/tips）">
+    </div>
+
+    <div class="modal-section-title">调度规则</div>
+    <div class="rule-block">
+      <div class="rule-head">
+        <span class="rule-id">morning</span>
+        <span class="rule-badge">cron</span>
+        <span style="flex:1"></span>
+        <button class="icon-btn" style="width:26px;height:26px" title="删除规则">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="rule-fields">
+        <div class="form-row">
+          <label>cron 表达式</label>
+          <input type="text" value="29 8 * * *">
+        </div>
+        <div class="form-row">
+          <label>参数 args</label>
+          <input type="text" value="--phase morning">
+        </div>
+      </div>
+    </div>
+    <div class="rule-block">
+      <div class="rule-head">
+        <span class="rule-id">evening</span>
+        <span class="rule-badge">cron</span>
+        <span style="flex:1"></span>
+        <button class="icon-btn" style="width:26px;height:26px" title="删除规则">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="rule-fields">
+        <div class="form-row">
+          <label>cron 表达式</label>
+          <input type="text" value="0 21 * * *">
+        </div>
+        <div class="form-row">
+          <label>参数 args</label>
+          <input type="text" value="--phase evening">
+        </div>
+      </div>
+    </div>
+    <button class="btn btn-secondary btn-sm">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      添加规则
+    </button>
+
+    <div class="modal-section-title" style="margin-top:18px">失败补发</div>
+    <div style="display:flex;gap:12px;align-items:center">
+      <span style="font-size:13px;color:var(--muted)">间隔</span>
+      <input type="number" value="900" style="width:100px">
+      <span style="font-size:13px;color:var(--muted)">秒 · 最多</span>
+      <input type="number" value="3" style="width:80px">
+      <span style="font-size:13px;color:var(--muted)">次</span>
+    </div>
+
+    <div class="modal-section-title" style="margin-top:18px">启停</div>
+    <div class="setting-row">
+      <div class="setting-text">
+        <div class="setting-title">运行状态</div>
+        <div class="setting-hint">禁用后不再调度，推送入口也不放行</div>
+      </div>
+      <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+    </div>
+
+    <div class="modal-section-title" style="margin-top:18px">模块参数</div>
+    <p class="modal-desc" style="margin-bottom:0">该模块暂无自定义参数。模块设计时由模块自声明配置项，此处将自动渲染对应表单。</p>
+
+    </div><!-- modal-body end -->
+    <div class="modal-foot">
+      <button class="btn btn-secondary" data-close="moduleModal">取消</button>
+      <button class="btn btn-primary" data-close="moduleModal">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="theme.js"></script>
+<script>
+(function () {
+  var items = document.querySelectorAll(".nav-item");
+  var pages = document.querySelectorAll(".admin-page");
+  var titles = { basic: "基础设置", user: "用户与助理", modules: "模块管理" };
+
+  items.forEach(function (item) {
+    item.addEventListener("click", function () {
+      var page = item.dataset.page;
+      items.forEach(function (i) { i.classList.toggle("active", i === item); });
+      pages.forEach(function (p) { p.style.display = p.dataset.page === page ? "" : "none"; });
+      document.getElementById("pageTitle").textContent = titles[page];
+    });
+  });
+
+  /* 弹窗 */
+  function open(id) { document.getElementById(id).classList.add("show"); }
+  function close(id) { document.getElementById(id).classList.remove("show"); }
+  document.getElementById("advBtn").addEventListener("click", function () { open("advModal"); });
+  document.getElementById("addModuleBtn").addEventListener("click", function () { open("addModal"); });
+  document.getElementById("logBtn").addEventListener("click", function () { open("logModal"); });
+
+  /* 模块设置弹窗：模块条目的设置圆钮打开 */
+  function bindGear() {
+    document.querySelectorAll(".module-gear").forEach(function (g) {
+      if (g.dataset.bound) return;
+      g.dataset.bound = "1";
+      g.addEventListener("click", function () { open("moduleModal"); });
+    });
+  }
+  bindGear();
+
+  /* 添加模块：网格多选 + 安装计数 */
+  var modCards = document.querySelectorAll("#modGrid .mod-card");
+  var modInstall = document.getElementById("modInstall");
+  function modCount() { return document.querySelectorAll("#modGrid .mod-card.selected").length; }
+  function modRefresh() { modInstall.textContent = "安装所选（" + modCount() + "）"; }
+  modCards.forEach(function (card) {
+    card.addEventListener("click", function () {
+      card.classList.toggle("selected");
+      modRefresh();
+    });
+  });
+  modInstall.addEventListener("click", function () {
+    var selected = document.querySelectorAll("#modGrid .mod-card.selected");
+    var list = document.getElementById("moduleList");
+    selected.forEach(function (card) {
+      var name = card.dataset.name;
+      var desc = card.querySelector(".mod-desc").textContent;
+      var src = card.querySelector(".mod-src").textContent;
+      var item = document.createElement("div");
+      item.className = "module-item";
+      item.dataset.src = src === "本地开发目录" ? "local" : "github";
+      item.innerHTML =
+        '<div class="module-info">' +
+          '<div class="module-name">' + name + '</div>' +
+          '<div class="module-desc">' + desc + ' · ' + src + '</div>' +
+        '</div>' +
+        '<div class="module-actions">' +
+          '<button class="icon-btn module-gear" title="模块设置">' +
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>' +
+          '</button>' +
+          '<label class="switch"><input type="checkbox" checked><span class="slider"></span></label>' +
+          '<button class="btn btn-danger btn-sm module-del" hidden>' + (src === "本地开发目录" ? "隐藏" : "删除") + '</button>' +
+        '</div>';
+      list.appendChild(item);
+      card.classList.remove("selected");
+    });
+    modRefresh();
+  });
+
+  /* 模块源：类型切换 + 添加（demo） */
+  document.getElementById("addSourceBtn").addEventListener("click", function () { open("addSourceModal"); });
+  var segBtns = document.querySelectorAll("#sourceTypeSeg .seg-btn");
+  segBtns.forEach(function (b) {
+    b.addEventListener("click", function () {
+      segBtns.forEach(function (x) { x.classList.toggle("active", x === b); });
+      var t = b.dataset.type;
+      document.getElementById("sourceGithubRow").style.display = t === "github" ? "" : "none";
+      document.getElementById("sourceLocalRow").style.display = t === "local" ? "" : "none";
+    });
+  });
+  document.getElementById("addSourceConfirm").addEventListener("click", function () {
+    var type = document.querySelector("#sourceTypeSeg .seg-btn.active").dataset.type;
+    var value = type === "github"
+      ? document.getElementById("sourceUrl").value.trim()
+      : document.getElementById("sourcePath").value.trim();
+    if (!value) return;
+    var name;
+    if (type === "github") {
+      name = value.replace(/^https?:\/\/(www\.)?github\.com\//, "").replace(/\/+$/, "") || value;
+    } else {
+      name = value.split("/").filter(Boolean).pop() || value;
+    }
+    var item = document.createElement("div");
+    item.className = "module-item";
+    item.innerHTML =
+      '<div class="module-info">' +
+        '<div class="module-name">' + name + '</div>' +
+        '<div class="module-desc">' + value + (type === "local" ? " · 本地源" : "") + '</div>' +
+      '</div>' +
+      '<button class="icon-btn" title="模块源设置">' +
+        '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>' +
+      '</button>' +
+      '<label class="switch"><input type="checkbox" checked><span class="slider"></span></label>' +
+      '<button class="btn btn-danger btn-sm module-del" hidden>删除</button>';
+    document.getElementById("sourceList").appendChild(item);
+    document.getElementById("sourceUrl").value = "";
+    document.getElementById("sourcePath").value = "";
+    close("addSourceModal");
+  });
+
+  /* 模块/模块源：管理模式（各自容器内：设置钮+开关 → 删除钮） */
+  function bindMgr(btn, containerId) {
+    var on = false;
+    btn.addEventListener("click", function () {
+      on = !on;
+      document.querySelectorAll("#" + containerId + " .module-item").forEach(function (item) {
+        var gear = item.querySelector(".icon-btn");
+        var sw = item.querySelector(".switch");
+        var del = item.querySelector(".module-del");
+        if (gear) gear.style.display = on ? "none" : "";
+        if (sw) sw.style.display = on ? "none" : "";
+        if (del) del.hidden = !on;
+      });
+      btn.textContent = on ? "完成" : btn.dataset.label;
+      btn.classList.toggle("btn-primary", on);
+      btn.classList.toggle("btn-secondary", !on);
+    });
+  }
+  bindMgr(document.getElementById("mgrBtn"), "moduleList");
+  bindMgr(document.getElementById("sourceMgrBtn"), "sourceList");
+  document.addEventListener("click", function (e) {
+    if (e.target.classList && e.target.classList.contains("module-del")) {
+      e.target.closest(".module-item").remove();
+    }
+  });
+
+  /* 保存按钮反馈（demo：先落条目，再短暂显示"已保存 ✓"） */
+  document.addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest(".btn-primary") : null;
+    if (!btn) return;
+    var label = btn.textContent.replace(/\s+/g, " ").trim();
+    if (label === "保存" && !btn.dataset.saving) {
+      btn.dataset.saving = "1";
+      /* 兴趣爱好行内：输入非空 → 先添加胶囊条目 */
+      if (habitInput && habitInput.value.trim()) addHabit();
+      var orig = btn.innerHTML;
+      btn.innerHTML = "已保存 ✓";
+      btn.disabled = true;
+      setTimeout(function () {
+        btn.innerHTML = orig;
+        btn.disabled = false;
+        delete btn.dataset.saving;
+      }, 1400);
+    }
+  });
+  document.querySelectorAll("[data-close]").forEach(function (b) {
+    b.addEventListener("click", function () { close(b.dataset.close); });
+  });
+  document.querySelectorAll(".modal-overlay").forEach(function (ov) {
+    ov.addEventListener("click", function (e) { if (e.target === ov) ov.classList.remove("show"); });
+  });
+
+  /* 兴趣爱好：添加胶囊（回车 或 点保存） */
+  var habitInput = document.getElementById("habitInput");
+  function addHabit() {
+    if (!habitInput.value.trim()) return false;
+    var tag = document.createElement("span");
+    tag.className = "tag";
+    tag.innerHTML = habitInput.value.trim() + ' <span class="x">✕</span>';
+    habitInput.parentElement.parentElement.querySelector(".tag-list").appendChild(tag);
+    habitInput.value = "";
+    return true;
+  }
+  habitInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") addHabit();
+  });
+  document.addEventListener("click", function (e) {
+    if (e.target.classList && e.target.classList.contains("x")) {
+      e.target.parentElement.remove();
+    }
+  });
+
+  /* 头像上传（demo：FileReader → 两处头像替换，撤销恢复） */
+  var avatarFile = document.getElementById("avatarFile");
+  var topAvatar = document.getElementById("topAvatar");
+  var profileAvatar = document.getElementById("profileAvatar");
+  var avatarUndo = document.getElementById("avatarUndo");
+  var prevAvatar = "";
+
+  document.getElementById("uploadAvatarBtn").addEventListener("click", function () {
+    avatarFile.click();
+  });
+  avatarFile.addEventListener("change", function () {
+    var f = avatarFile.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      prevAvatar = topAvatar.style.backgroundImage;
+      topAvatar.style.backgroundImage = "url(" + e.target.result + ")";
+      profileAvatar.style.backgroundImage = "url(" + e.target.result + ")";
+      topAvatar.classList.add("has-img");
+      profileAvatar.classList.add("has-img");
+    };
+    reader.readAsDataURL(f);
+  });
+  avatarUndo.addEventListener("click", function () {
+    if (prevAvatar) {
+      topAvatar.style.backgroundImage = prevAvatar;
+      profileAvatar.style.backgroundImage = prevAvatar;
+    } else {
+      topAvatar.style.backgroundImage = "";
+      profileAvatar.style.backgroundImage = "";
+      topAvatar.classList.remove("has-img");
+      profileAvatar.classList.remove("has-img");
+    }
+    prevAvatar = "";
+  });
+
+  /* 定位授权（demo：模拟） */
+  document.getElementById("locateBtn").addEventListener("click", function () {
+    this.textContent = "⏳ 定位中…";
+    var btn = this;
+    setTimeout(function () {
+      document.getElementById("citySelect").value = "Jining";
+      btn.textContent = "✅ 已定位：集宁";
+      setTimeout(function () { btn.textContent = "📍 定位授权"; }, 2500);
+    }, 1200);
+  });
+
+  /* opencode 优化（demo：占位） */
+  document.getElementById("opencodeRun").addEventListener("click", function () {
+    this.textContent = "⏳ 会话进行中…";
+    var btn = this;
+    setTimeout(function () {
+      btn.textContent = "✅ 已生成建议";
+      setTimeout(function () { btn.textContent = "用 opencode 优化"; }, 2500);
+    }, 1500);
+  });
+})();
+</script>
+</body>
+</html>

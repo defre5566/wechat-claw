@@ -29,3 +29,10 @@ The directory `vendor/wechat_agent_sdk/` contains a source snapshot of the
 (https://github.com/AIhubmix/wechat-agent-sdk). The snapshot is distributed
 for convenience of offline installation and is NOT covered by the copyright
 notice above; its copyright and license belong to the original author.
+
+The directory `vendor/nssm/` contains pre-built binaries of NSSM (the
+Non-Sucking Service Manager, version 2.24, https://nssm.cc), used to run
+wechat-bridge as a Windows service. NSSM is public domain ("You may
+unconditionally use it and/or its source code for any purpose you wish");
+the binaries are distributed for convenience of Windows deployment and are
+NOT covered by the copyright notice above.

@@ -18,7 +18,8 @@
       "modules/**/token": "deny",
       "agent-SDK/push_token": "deny",
       "modules/**/anniversaries.json.enc": "deny",
-      "~/.config/wechat-claw/secret.key": "deny"
+      ".config/crypto.key": "deny",
+      ".config/admin.password": "deny"
     },
 
     // 写类：默认 ask（走微信确认），不配置豁免即全部需确认。

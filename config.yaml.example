@@ -1,31 +1,10 @@
-# wechat-claw 基础设施配置（可选项）
-# 放置：~/.config/wechat-claw/config.yaml（Linux）/ %USERPROFILE%\.config\wechat-claw\config.yaml（Windows）
-# 不放置此文件 = 全部使用内置默认值，本文件即默认值的完整参考。
-# 说明：模块业务配置（城市/位置/vault 路径/时政目录等）不在本文件，属后续模块配置化范围。
-
-# 推送入口（bridge /push 服务）
-push:
-  host: 127.0.0.1
-  port: 9898
-  max_body_mb: 100          # body 上限，超限 413
-  retry_attempts: 3         # 模块推送重试次数
-  retry_interval: 3         # 重试间隔（秒）
-  timeout: 15               # 单次请求超时（秒）
-
-# 会话与权限
-session:
-  ttl_seconds: 18000        # 微信会话窗时长（5 小时 = 18000 秒）
-  perm_timeout_seconds: 30  # 高危操作微信确认超时（无回复默认拒绝）
-
-# 调度引擎
-scheduler:
-  run_timeout_seconds: 300  # 模块子进程超时保护（秒）
-  prune_days: 30            # 状态文件（防重/调度）修剪保留天数
-
-# 统一日志
-log:
-  rotate_mb: 1              # 日志轮转大小（MB）
-  backup_count: 2           # 保留历史份数
+# wechat-claw 用户配置（可选项）
+# 放置：<项目根>/.config/config.yaml
+# 不放置此文件 = 用户段全部使用内置默认值，本文件即默认值的完整参考。
+# 说明：
+#   - 运行参数（push/session/scheduler/log）由 bridge 内置，**不可在此配置**（文件不生效）
+#   - 模块业务配置（城市/vault 路径等）属模块层，勿写进本文件
+#   - 路径支持相对项目根写法（如 inbox、.config/crypto.key）
 
 # opencode 子进程
 acp:
@@ -42,9 +21,9 @@ file_send:
     - ~/音乐
     - ~/视频
     - ~/公共
-    - ~/wechat-claw/inbox
+    - inbox               # 相对项目根（微信收到的媒体文件目录）
   reject_dirs:
-    - ~/.config/wechat-claw
+    - .config             # 相对项目根（用户配置/密钥目录，硬拒）
     - ~/.ssh
     - ~/.gnupg
   reject_name_re: token|secret|credential|private|anniversaries\.json\.enc
@@ -57,4 +36,4 @@ file_send:
 
 # 隐私数据密钥
 crypto:
-  key_file: ~/.config/wechat-claw/secret.key
+  key_file: .config/crypto.key    # 相对项目根，自动生成（chmod 600）

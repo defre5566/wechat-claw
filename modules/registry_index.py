@@ -23,7 +23,10 @@ def _token_hash(name: str) -> str | None:
 
 
 def build_index() -> dict:
-    """返回 {模块名: {name, purpose, spec, schedule, retry, args, token_hash}}。"""
+    """返回 {模块名: {name, purpose, spec, schedule, retry, args, token_hash, enabled}}。
+
+    仅含 enabled=true 的模块（register.py 管理启停；缺失或 false = 关闭，不进 index）。
+    """
     index: dict[str, dict] = {}
     for mod_dir in sorted(MODULES_DIR.iterdir()):
         if not mod_dir.is_dir():
@@ -36,6 +39,8 @@ def build_index() -> dict:
         except Exception:
             continue
         name = data.get("name") or mod_dir.name
+        if not data.get("enabled", False):
+            continue  # 关闭的模块不调度、不认 token
         index[name] = {
             "name": name,
             "purpose": data.get("purpose", ""),
@@ -43,6 +48,7 @@ def build_index() -> dict:
             "schedule": data.get("schedule", []),
             "retry": data.get("retry"),
             "token_hash": _token_hash(name),
+            "enabled": True,
         }
     return index
 

@@ -11,8 +11,10 @@
 - **主动推送**：HTTP 入口 `/push`（token 鉴权）→ 队列 → 分流 direct / file / agent
 - **通用调度引擎**：模块自描述（module.json 声明调度/重试），bridge 零业务知识
 - **自描述模块**：新模块写好 worker + module.json 即自动接入，bridge 零改动
-- **基础设施配置化**：`~/.config/wechat-claw/config.yaml` 覆盖全部默认值，不配也能跑
+- **基础设施配置化**：`<项目根>/.config/config.yaml` 覆盖用户段默认值（运行参数 bridge 内置），不配也能跑
+- **web 向导 + 管理后台**：初始化向导（体检/opencode/装配/配置/扫码登录/拉起）+ 管理后台（主题/用户与助理/模块管理，管理密码保护）
 - **SDK vendor 快照**：wechat-agent-sdk 0.2.1 全量进仓库，生产补丁预打，安装即修复
+- **Windows 服务零依赖**：NSSM 2.24 二进制随仓库 vendor，nssm 服务化免安装
 
 ## 架构
 
@@ -39,7 +41,7 @@
 | 依赖 | 版本 | 说明 |
 |---|---|---|
 | Python | >= 3.11 | 运行环境 |
-| opencode | 最新 | 对话 agent 运行时（`acp.command` 可配路径）；**web 初始化向导（规划中）将自动检测安装** |
+| opencode | 最新 | 对话 agent 运行时（`acp.command` 可配路径）；**web 初始化向导自动检测安装** |
 
 ## 安装方式
 
@@ -53,7 +55,7 @@ python3 -m venv .venv
 .venv/bin/python patches/apply_patches.py --check-only  # 期望全部 [SKIP] 已打
 ```
 
-守护进程与扫码登录见下方"基础设置"与 [docs/开发文档-03](docs/开发文档-03-操作手册.md)（Linux systemd / macOS launchd / Windows 计划任务）。
+守护进程与扫码登录见下方"基础设置"与 [docs/开发文档-03](docs/开发文档-03-操作手册.md)（Linux systemd / macOS launchd / Windows nssm）。
 
 ### 方式 B：可执行文件（规划中）
 
@@ -64,12 +66,11 @@ python3 -m venv .venv
 
 ### 1. 配置文件
 
-复制 [config.yaml.example](config.yaml.example) 到 `~/.config/wechat-claw/config.yaml`（Linux）或
-`%USERPROFILE%\.config\wechat-claw\config.yaml`（Windows）。**不放置 = 全部使用内置默认值**，本步可选。
+复制 [config.yaml.example](config.yaml.example) 到项目根 `.config/config.yaml`。**不放置 = 用户段全部使用内置默认值**，本步可选；或用 `web/start.sh`（Linux/macOS）`web/start.bat`（Windows）启动初始化向导自动生成。
 
 ### 2. 登录（扫码）
 
-- **主路径**：web 初始化向导扫码登录（规划中）
+- **主路径**：web 初始化向导扫码登录（`web/start.sh` 启动，第 5 步）
 - **当前可用（过渡）**：在项目根执行一次（token 保存后长期有效，失效时重跑）：
 
 ```bash
@@ -92,7 +93,7 @@ EOF
 
 - Linux：systemd user 服务（`wechat-bridge.service`，Restart=on-failure + StartLimit）
 - macOS：launchd plist
-- Windows：计划任务
+- Windows：nssm 服务化（`vendor/nssm/` 已随仓库自带，无需另行安装）
 
 三平台完整配置见 [docs/开发文档-03](docs/开发文档-03-操作手册.md)。
 
@@ -103,7 +104,7 @@ EOF
 
 ## 安全模型
 
-- **deny 四项**：对话 agent 不可读 `modules/**/token`、`agent-SDK/push_token`、`anniversaries.json.enc`、`~/.config/wechat-claw/secret.key`（opencode.jsonc.example 默认配置）
+- **deny 四项**：对话 agent 不可读 `modules/**/token`、`agent-SDK/push_token`、`anniversaries.json.enc`、`.config/crypto.key`、`.config/admin.password`（opencode.jsonc.example 默认配置）
 - **文件发送三级**：个人目录直发 / 其余路径微信确认（30s 无回复拒绝）/ token 密钥类硬拒（bridge/paths.py 单点执行，路径规范化防 `../` 与符号链接绕过）
 - **/push 鉴权**：Bearer token sha256 命中模块索引哈希放行，401 记日志（IP + token 前 4 位）
 - **资源保护**：/push body 上限 100MB（413）、队列有界（满 503）
@@ -122,10 +123,13 @@ EOF
 ```
 ├── AGENTS.md / AGENTS-example.md   # 对话 agent 系统提示模板 / 实例
 ├── opencode.jsonc.example          # 对话 agent 权限配置示例
-├── config.yaml.example             # 基础设施配置示例
+├── config.yaml.example             # 用户配置示例（运行参数 bridge 内置）
 ├── bridge/                         # 基础设施：main / push_server / scheduler / session / state
 ├── modules/                        # 业务模块 + common（数据公共库）+ register.py + registry_index.py
 ├── vendor/wechat_agent_sdk/        # wechat-agent-sdk 0.2.1 全量快照（补丁预打）
+├── vendor/nssm/                    # NSSM 2.24 二进制（Windows 服务化，public domain）
+├── web/                            # 初始化向导 + 管理后台（launcher/wizard/handlers/static）
+├── .config/                        # 用户配置目录（部署后生成，备份 = 打包此目录）
 ├── patches/apply_patches.py        # SDK 补丁（生产 pip 安装重打用；分发侧作校验器）
 ├── docs/                           # 开发文档 01-04
 └── tests/                          # 纯函数回归（pytest）
@@ -137,10 +141,10 @@ EOF
 |---|---|
 | [开发文档-01](docs/开发文档-01-总览与设计.md) | 架构总览 / 进程端口 / 调度机制 / 权限体系 / 演进记录 |
 | [开发文档-02](docs/开发文档-02-组件参考.md) | SDK 补丁 / bridge 四大块 / common / /push 协议 |
-| [开发文档-03](docs/开发文档-03-操作手册.md) | 从零复现 / systemd·launchd·计划任务 / 加模块 / 运维排障 |
+| [开发文档-03](docs/开发文档-03-操作手册.md) | 从零复现 / systemd·launchd·nssm / 加模块 / 运维排障 |
 | [开发文档-04](docs/开发文档-04-模块开发规范.md) | 模块标准骨架 / module.json 格式 / 铁律 / common 边界 |
 
 ## 规划中
 
-- **web 初始化向导**：环境体检 → opencode 安装 → 项目装配 → 配置生成（config.yaml/opencode.jsonc）→ 扫码登录
+- **web 初始化向导与管理后台**：已实现（web/，`web/start.sh` / `web/start.bat` 启动）；P1 管理后台增强（模块源下载、日志可视化、schema 表单）规划中
 - **可执行文件打包**：单文件产物 + 向导装配（README 方式 B）

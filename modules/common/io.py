@@ -13,7 +13,7 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
-from .config import get
+from bridge.config import get
 
 SHARED_DIR = Path(__file__).resolve().parent / "shared"
 

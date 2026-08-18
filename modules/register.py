@@ -1,72 +1,213 @@
-"""模块注册：生成/重置模块 token（0600）并写各模块自描述 module.json。
+"""模块管理器（唯一入口）：注册/更新/启停/列表/卸载。
 
-用法:
-  python3 modules/register.py <模块名> [--purpose 用途] [--spec 规范文件] \\
-      [--schedule-json 'json 数组'] [--retry-json 'json 或 null']
+- 函数库形态：web 后端 import 调用；CLI 形态：python3 modules/register.py ...
+- module.json 是唯一落盘（enabled/调度/retry/token 均在此）；build_index 实时扫描
+- enabled 语义：缺失或 false = 关闭（不调度、不推送、不进 index）；显式 true = 启用；
+  新注册默认写 false（手动启用后才运行）
 
-说明:
-  - token 每次注册重置（index 的 token_hash 由 build_index 实时从 token 计算，自动跟随）
-  - module.json 已存在的字段保留，只更新指定字段
-  - 模块注册后由 scheduler 的 build_index() 自动发现，bridge 零改动
+用法（CLI）:
+  python3 modules/register.py <name> [--purpose 用途] [--spec 规范] \
+      [--schedule-json 'json'] [--retry-json 'json|null']
+  python3 modules/register.py --enable <name> | --disable <name> | --list | --uninstall <name>
 """
 from __future__ import annotations
 
 import json
 import secrets
+import shutil
 import sys
 from pathlib import Path
 
 MODULES_DIR = Path(__file__).resolve().parent
 
 
-def main() -> int:
-    if len(sys.argv) < 2:
-        print(__doc__)
-        return 1
-    name = sys.argv[1]
-    args = sys.argv[2:]
+# ---------- 内部 IO ----------
 
-    opts: dict[str, str] = {}
-    i = 0
-    while i < len(args):
-        if args[i] in ("--purpose", "--spec", "--schedule-json", "--retry-json") and i + 1 < len(args):
-            opts[args[i][2:]] = args[i + 1]  # 去掉 -- 前缀
-            i += 2
-        else:
-            i += 1
-
-    mod_dir = MODULES_DIR / name
-    mod_dir.mkdir(parents=True, exist_ok=True)
-
-    # token：重置 + 0600
-    token_file = mod_dir / "token"
-    token = secrets.token_hex(32)
-    token_file.write_text(token)
-    token_file.chmod(0o600)
-
-    # module.json：保留已有字段，更新指定字段
-    mj = mod_dir / "module.json"
-    data = {}
+def _load_module_json(name: str) -> dict:
+    mj = MODULES_DIR / name / "module.json"
     if mj.is_file():
         try:
             data = json.loads(mj.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
         except Exception:
-            data = {}
-    data["name"] = name
-    if "purpose" in opts:
-        data["purpose"] = opts["purpose"]
-    if "spec" in opts:
-        data["spec"] = opts["spec"]
-    data.setdefault("purpose", "")
-    data.setdefault("spec", "规范.md")
-    if "schedule-json" in opts:
-        data["schedule"] = json.loads(opts["schedule-json"])
-    if "retry-json" in opts:
-        data["retry"] = json.loads(opts["retry-json"])  # 支持 null
-    mj.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+            pass
+    return {}
 
-    print(f"[register] {name}: token -> {token_file} (0600 已重置), module.json 已更新")
-    print(f"[register] schedule={data.get('schedule')!r} retry={data.get('retry')!r}")
+
+def _save_module_json(name: str, data: dict) -> bool:
+    try:
+        mj = MODULES_DIR / name / "module.json"
+        mj.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def module_exists(name: str) -> bool:
+    return (MODULES_DIR / name / "module.json").is_file()
+
+
+# ---------- 函数库 ----------
+
+def register_module(
+    name: str,
+    purpose: str = "",
+    spec: str = "规范.md",
+    schedule: list | None = None,
+    retry=None,
+) -> dict:
+    """注册模块：建目录 + 重置 token（0600）+ 写 module.json（enabled 默认 false）。"""
+    mod_dir = MODULES_DIR / name
+    mod_dir.mkdir(parents=True, exist_ok=True)
+
+    token = secrets.token_hex(32)
+    token_file = mod_dir / "token"
+    token_file.write_text(token)
+    token_file.chmod(0o600)
+
+    data = _load_module_json(name)
+    data.update({
+        "name": name,
+        "purpose": purpose,
+        "spec": spec,
+        "enabled": False,  # 新注册默认关闭，手动启用后才运行
+    })
+    if schedule is not None:
+        data["schedule"] = schedule
+    if retry is not None:
+        data["retry"] = retry
+    data.setdefault("schedule", [])
+    data.setdefault("retry", None)
+    ok = _save_module_json(name, data)
+    return {"ok": ok, "name": name, "enabled": False, "token_file": str(token_file)}
+
+
+def update_module(
+    name: str,
+    purpose: str | None = None,
+    spec: str | None = None,
+    schedule: list | None = None,
+    retry=None,
+    retry_set: bool = False,
+) -> bool:
+    """保留字段式更新 module.json。"""
+    if not module_exists(name):
+        return False
+    data = _load_module_json(name)
+    if purpose is not None:
+        data["purpose"] = purpose
+    if spec is not None:
+        data["spec"] = spec
+    if schedule is not None:
+        data["schedule"] = schedule
+    if retry_set:
+        data["retry"] = retry
+    return _save_module_json(name, data)
+
+
+def set_enabled(name: str, enabled: bool) -> bool:
+    """唯一启停入口：写 module.json 的 enabled 字段。"""
+    if not module_exists(name):
+        return False
+    data = _load_module_json(name)
+    data["enabled"] = bool(enabled)
+    return _save_module_json(name, data)
+
+
+def get_module(name: str) -> dict | None:
+    """读单个模块配置（含 enabled；不存在返回 None）。"""
+    if not module_exists(name):
+        return None
+    data = _load_module_json(name)
+    data["enabled"] = bool(data.get("enabled", False))
+    return data
+
+
+def list_modules() -> list[dict]:
+    """全部模块（含禁用）：name/enabled/purpose/schedule/retry。"""
+    items = []
+    for mod_dir in sorted(MODULES_DIR.iterdir()):
+        if not mod_dir.is_dir():
+            continue
+        mj = mod_dir / "module.json"
+        if not mj.is_file():
+            continue
+        name = mod_dir.name
+        data = _load_module_json(name)
+        items.append({
+            "name": name,
+            "purpose": data.get("purpose", ""),
+            "schedule": data.get("schedule", []),
+            "retry": data.get("retry"),
+            "enabled": bool(data.get("enabled", False)),
+        })
+    return items
+
+
+def uninstall(name: str) -> bool:
+    """卸载模块：删除整个模块目录（文件 + token + module.json；不可恢复）。"""
+    mod_dir = MODULES_DIR / name
+    if not mod_dir.is_dir():
+        return False
+    try:
+        shutil.rmtree(mod_dir)
+        return True
+    except OSError:
+        return False
+
+
+# ---------- CLI ----------
+
+def main(argv: list[str] | None = None) -> int:
+    argv = argv or sys.argv[1:]
+    if not argv:
+        print(__doc__)
+        return 1
+
+    if argv[0] == "--list":
+        for m in list_modules():
+            state = "启用" if m["enabled"] else "关闭"
+            print(f"[{state}] {m['name']}: {m['purpose'] or '（无用途）'} schedule={m['schedule']!r}")
+        return 0
+
+    if argv[0] in ("--enable", "--disable") and len(argv) >= 2:
+        name = argv[1]
+        if set_enabled(name, argv[0] == "--enable"):
+            print(f"[register] {name} 已{'启用' if argv[0] == '--enable' else '关闭'}")
+            return 0
+        print(f"[register] 模块不存在: {name}")
+        return 1
+
+    if argv[0] == "--uninstall" and len(argv) >= 2:
+        if uninstall(argv[1]):
+            print(f"[register] {argv[1]} 已卸载（文件已删除）")
+            return 0
+        print(f"[register] 卸载失败: {argv[1]}")
+        return 1
+
+    # 注册/更新（兼容原 CLI）
+    name = argv[0]
+    opts: dict[str, str] = {}
+    i = 1
+    while i < len(argv):
+        if argv[i] in ("--purpose", "--spec", "--schedule-json", "--retry-json") and i + 1 < len(argv):
+            opts[argv[i][2:]] = argv[i + 1]
+            i += 2
+        else:
+            i += 1
+    result = register_module(
+        name,
+        purpose=opts.get("purpose", ""),
+        spec=opts.get("spec", "规范.md"),
+        schedule=json.loads(opts["schedule-json"]) if "schedule-json" in opts else None,
+        retry=json.loads(opts["retry-json"]) if "retry-json" in opts else None,
+    )
+    if not result["ok"]:
+        print(f"[register] 注册失败: {name}")
+        return 1
+    print(f"[register] {name}: token -> {result['token_file']} (0600 已重置)")
+    print(f"[register] enabled=false（默认关闭，--enable 开启后才会被调度）")
     return 0
 
 

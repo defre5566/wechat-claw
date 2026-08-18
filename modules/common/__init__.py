@@ -6,11 +6,13 @@
 from __future__ import annotations
 
 from .crypto import decrypt, encrypt
-from .config import get as get_config, get
+from bridge.config import get as get_config, get
 from .calendar import get_fufu, get_jieqi, get_lunar, in_fufu
 from .holidays import is_holiday
 from .io import load_sent_json, prune_state_file, save_sent_json, shared_load, shared_save
 from .locations import DEFAULT_LOC, LOCATIONS
+from .location import get_city, set_city, undo_city
+from .habit import get_habits, set_habits, undo_habits
 from .log import log_event
 from .push import load_token, post_push
 from .task import (

@@ -9,7 +9,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from .config import get
+from bridge.config import get
 
 PUSH_URL = f"http://{get('push.host')}:{get('push.port')}/push"
 RETRY = get("push.retry_attempts")

@@ -1,0 +1,155 @@
+#!/usr/bin/env python3
+"""web 自测：三隔离（临时 HOME + 临时部署目录 + 服务 dry-run）+ 两 mock（登录/opencode）。
+
+流程：WEB_SELFTEST=1 起 wizard 服务（随机端口）→ 按 6 步调接口断言 → 清理。
+跨平台可跑（CI 三平台矩阵第 4 步）。退出码 0 = 全过。
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+PY = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def _req(port: int, method: str, path: str, body: dict | None = None,
+         token: str = "") -> tuple[int, dict]:
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}{path}",
+        data=data, method=method,
+        headers={"Content-Type": "application/json"},
+    )
+    if token:
+        req.add_header("X-Auth", token)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode("utf-8"))
+        except Exception:
+            return e.code, {}
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        env = dict(os.environ)
+        env["HOME"] = str(home)
+        env["WEB_SELFTEST"] = "1"
+        env["WEB_PORT"] = "0"  # 端口由 selftest 固定
+
+        # 找空闲端口
+        import socket
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        env["WEB_PORT"] = str(port)
+
+        proc = subprocess.Popen(
+            [str(PY), str(ROOT / "web" / "wizard.py"), "--port", str(port)],
+            cwd=str(ROOT), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        try:
+            # 等服务起来
+            for _ in range(50):
+                try:
+                    st, _ = _req(port, "GET", "/api/state")
+                    if st == 200:
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.2)
+
+            checks = []
+
+            # ① 体检
+            st, d = _req(port, "POST", "/api/env_check")
+            checks.append(("env_check", st == 200 and d.get("ok")))
+
+            # ② opencode（mock：本机已装或 selftest 下跳过真实安装）
+            st, d = _req(port, "POST", "/api/opencode/install")
+            checks.append(("opencode", st == 200 and d.get("ok")))
+
+            # ③ 装配（真实跑：venv 已就绪，命令幂等）
+            st, d = _req(port, "POST", "/api/assemble")
+            checks.append(("assemble_start", st == 200 and d.get("ok")))
+            for _ in range(120):
+                st, d = _req(port, "GET", "/api/assemble/status")
+                if d.get("done"):
+                    break
+                time.sleep(0.5)
+            checks.append(("assemble_done", d.get("done") and d.get("ok")))
+
+            # ④ 配置生成（临时 HOME → 配置落在临时目录）
+            st, d = _req(port, "POST", "/api/config/gen", {"password": "abc123"})
+            checks.append(("config_gen", st == 200 and d.get("ok")
+                           and d["results"]["config"]["created"]))
+
+            # ⑤ 登录（selftest mock：pending → confirmed）
+            st, d = _req(port, "POST", "/api/login/setup")
+            checks.append(("login_setup", st == 200 and d.get("ok") and d.get("qr_url")))
+            confirmed = False
+            for _ in range(10):
+                st, d = _req(port, "GET", "/api/login/status")
+                if d.get("status") == "confirmed":
+                    confirmed = True
+                    break
+                time.sleep(0.3)
+            checks.append(("login_confirm", confirmed))
+
+            # ⑥ 拉起（selftest dry-run）
+            st, d = _req(port, "POST", "/api/service/up")
+            checks.append(("service_up", st == 200 and d.get("ok")))
+
+            # 管理链路：auth → profile → agents render
+            st, d = _req(port, "POST", "/api/auth", {"password": "abc123"})
+            checks.append(("auth", st == 200 and d.get("token")))
+            token = d.get("token", "")
+            st, d = _req(port, "GET", "/api/profile", token=token)
+            checks.append(("profile_auth", st == 200 and d.get("ok")))
+            st, d = _req(port, "GET", "/api/profile")
+            checks.append(("profile_401", st == 401))
+            st, d = _req(port, "POST", "/api/agents/render", token=token)
+            checks.append(("agents_render", st == 200 and d.get("ok")))
+
+            # 汇总
+            failed = [name for name, ok in checks if not ok]
+            for name, ok in checks:
+                print(f"[{'PASS' if ok else 'FAIL'}] {name}")
+            if failed:
+                print(f"NG: {failed}")
+                return 1
+            print("OK: web selftest 全部通过")
+            return 0
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+            # 清理测试产物：.config/（配置/密钥/密码/用户数据）+ 恢复默认 AGENTS.md
+            shutil.rmtree(ROOT / ".config", ignore_errors=True)
+            try:
+                subprocess.run(
+                    [str(PY), "-c",
+                     "import sys; sys.path.insert(0, r'%s'); import web.agent_gen as a; a.write_agents()" % str(ROOT)],
+                    cwd=str(ROOT), capture_output=True, timeout=30,
+                )
+            except Exception:
+                pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

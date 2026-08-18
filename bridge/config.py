@@ -1,10 +1,14 @@
-"""config：基础设施配置层（读 ~/.config/wechat-claw/config.yaml）。
+"""config：基础设施配置层（读 <项目根>/.config/config.yaml）。
 
-- 文件不存在 → 全部用内置默认（= 改造前的硬编码常量，老用户零影响）
-- 优先级：config.yaml > 内置默认（无环境变量覆盖层）
+- 运行参数（push/session/scheduler/log）= bridge 内置默认，**配置文件不可覆盖**
+- 用户参数（acp/file_send/crypto）可经 config.yaml 覆盖（深合并生效）
+- 优先级：config.yaml（用户段）> DEFAULTS_USER > DEFAULTS_RUNTIME（恒内置）
 - 键访问用点号路径：get("push.port") → config["push"]["port"]
+- 路径类配置（crypto.key_file / file_send 目录）支持相对项目根写法，经 resolve_path 解析
+- 归属：bridge 基础设施层（bridge 必须能不依赖模块运行）；modules/common 经
+  `from bridge.config import get` 读取——模块依赖基础设施为设计方向
 
-新用户/分发场景：由初始化向导或手工复制 config.yaml.example 生成。
+新用户/分发场景：由初始化向导生成（DEFAULTS_USER 序列化），或手工参考 config.yaml.example。
 """
 from __future__ import annotations
 
@@ -12,10 +16,11 @@ from pathlib import Path
 
 import yaml
 
-CONFIG_FILE = Path.home() / ".config" / "wechat-claw" / "config.yaml"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_FILE = PROJECT_ROOT / ".config" / "config.yaml"
 
-# 内置默认值（= 改造前各文件的硬编码常量，保持行为不变）
-DEFAULTS: dict = {
+# ---- 运行参数（bridge 内置，不可被配置文件覆盖）----
+DEFAULTS_RUNTIME: dict = {
     "push": {
         "host": "127.0.0.1",
         "port": 9898,
@@ -36,6 +41,10 @@ DEFAULTS: dict = {
         "rotate_mb": 1,
         "backup_count": 2,
     },
+}
+
+# ---- 用户参数（config.yaml 合并基准，GUI 可配置）----
+DEFAULTS_USER: dict = {
     "acp": {
         "command": "opencode",
         "port": 45678,
@@ -43,22 +52,36 @@ DEFAULTS: dict = {
     "file_send": {
         "default_dirs": [
             "~/文档", "~/下载", "~/桌面", "~/图片",
-            "~/音乐", "~/视频", "~/公共", "~/wechat-claw/inbox",
+            "~/音乐", "~/视频", "~/公共", "inbox",   # inbox = <项目根>/inbox
         ],
-        "reject_dirs": ["~/.config/wechat-claw", "~/.ssh", "~/.gnupg"],
+        "reject_dirs": [".config", "~/.ssh", "~/.gnupg"],  # .config = <项目根>/.config
         "reject_name_re": "token|secret|credential|private|anniversaries\\.json\\.enc",
         "reject_suffixes": [".key", ".pem", ".p12", ".pfx", ".p8"],
     },
     "crypto": {
-        "key_file": "~/.config/wechat-claw/secret.key",
+        "key_file": ".config/crypto.key",   # 相对项目根
     },
 }
+
+# 完整默认表（get() 的合并基准 = 运行参数 + 用户默认）
+DEFAULTS: dict = {**DEFAULTS_RUNTIME, **DEFAULTS_USER}
 
 _cached: dict | None = None
 
 
+def resolve_path(p: str | Path) -> Path:
+    """解析配置里的路径：绝对路径/含 ~ 直接展开；相对路径基于项目根拼接。"""
+    s = str(p)
+    if s.startswith("~"):
+        return Path(s).expanduser().resolve()
+    path = Path(s)
+    if path.is_absolute():
+        return path.resolve()
+    return (PROJECT_ROOT / path).resolve()
+
+
 def _load() -> dict:
-    """读取 config.yaml，深合并到默认值（部分配置也生效）。失败回退默认。"""
+    """读 config.yaml 用户段，深合并到 DEFAULTS_USER；运行参数恒为内置。"""
     global _cached
     if _cached is not None:
         return _cached
@@ -70,7 +93,10 @@ def _load() -> dict:
                 cfg = data
     except Exception:
         cfg = {}
-    _cached = _merge(DEFAULTS, cfg)
+    # 只合并用户段键（文件里写运行参数段 = 无效，防止覆盖内置）
+    user_cfg = {k: v for k, v in cfg.items() if k in DEFAULTS_USER}
+    user = _merge(DEFAULTS_USER, user_cfg)
+    _cached = {**DEFAULTS_RUNTIME, **user}
     return _cached
 
 
