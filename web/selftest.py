@@ -121,6 +121,13 @@ def main() -> int:
             checks.append(("profile_auth", st == 200 and d.get("ok")))
             st, d = _req(port, "GET", "/api/profile")
             checks.append(("profile_401", st == 401))
+            st, d = _req(port, "POST", "/api/profile/city", {"code": "110101"}, token=token)
+            checks.append(("profile_city", st == 200 and d.get("ok")
+                           and d["city"].get("city") == "东城" and d["city"].get("code") == "110101"))
+            st, d = _req(port, "POST", "/api/profile/locate", {"lat": 39.92, "lon": 116.40}, token=token)
+            checks.append(("profile_locate", st == 200 and d.get("ok") and d.get("name")))
+            st, d = _req(port, "POST", "/api/profile/locate", {}, token=token)
+            checks.append(("profile_locate_bad", st == 400))
             st, d = _req(port, "POST", "/api/agents/render", token=token)
             checks.append(("agents_render", st == 200 and d.get("ok")))
 

@@ -131,6 +131,8 @@ ROUTES = {
     ("POST", "/api/admin/password"): _h("admin", "password_change", True),
     ("GET", "/api/profile"): _h("admin", "profile_get", True),
     ("POST", "/api/profile"): _h("admin", "profile_set", True),
+    ("POST", "/api/profile/city"): _h("admin", "profile_set_city", True),
+    ("POST", "/api/profile/locate"): _h("admin", "profile_locate", True),
     ("POST", "/api/profile/undo"): _h("admin", "profile_undo", True),
     ("POST", "/api/agents/render"): _h("admin", "agents_render", True),
     ("GET", "/api/admin/settings"): _h("admin", "settings_get", True),

@@ -5,11 +5,64 @@
 from __future__ import annotations
 
 import json
+import math
 
 from bridge.config import CONFIG_FILE, DEFAULTS_USER, PROJECT_ROOT
-from modules.common import get_city, get_habits, set_city, set_habits, undo_city, undo_habits
+from modules.common import get_city, get_habits, get_location, set_city, set_habits, undo_city, undo_habits
 from modules.registry_index import build_index
 from web import agent_gen, auth
+
+CITIES_PATH = PROJECT_ROOT / "web" / "static" / "cities.json"
+_cities_cache: list | None = None
+
+
+def _load_cities() -> list:
+    """加载城市库 [code, name, parent, pinyin, lat, lon]（模块级缓存）。"""
+    global _cities_cache
+    if _cities_cache is None:
+        try:
+            data = json.loads(CITIES_PATH.read_text(encoding="utf-8"))
+            _cities_cache = data if isinstance(data, list) else []
+        except Exception:
+            _cities_cache = []
+    return _cities_cache
+
+
+def _city_by_code(code: str) -> list | None:
+    for row in _load_cities():
+        if row[0] == code:
+            return row
+    return None
+
+
+def _city_with_coords(code: str) -> list | None:
+    """按 code 取条目；自身无坐标则沿 parent 上溯取最近有坐标的祖先。"""
+    seen: set[str] = set()
+    while code and code not in seen:
+        seen.add(code)
+        row = _city_by_code(code)
+        if row is None:
+            return None
+        if row[4] is not None and row[5] is not None:
+            return row
+        code = row[2]
+    return None
+
+
+def _nearest_city(lat: float, lon: float) -> list | None:
+    """经纬度 → 最近城市条目（平方距离，经度按 cos(lat) 修正；区级坐标）。"""
+    best: list | None = None
+    best_d = float("inf")
+    cos_lat = math.cos(math.radians(lat))
+    for row in _load_cities():
+        clat, clon = row[4], row[5]
+        if clat is None or clon is None:
+            continue
+        d = (clat - lat) ** 2 + ((clon - lon) * cos_lat) ** 2
+        if d < best_d:
+            best_d = d
+            best = row
+    return best
 
 
 # ---------- 登录 ----------
@@ -36,7 +89,7 @@ def password_change(app, body: dict | None = None) -> dict:
 def profile_get(app, body: dict | None = None) -> dict:
     return {
         "ok": True,
-        "city": get_city(),
+        "location": get_location(),
         "habits": get_habits(),
         "identity": agent_gen.get_identity(),
         "rules": agent_gen.get_rules(),
@@ -54,6 +107,33 @@ def profile_set(app, body: dict | None = None) -> dict:
     if "rules" in body:
         agent_gen.set_rules([str(r) for r in body["rules"]])
     return {"ok": True}
+
+
+def profile_set_city(app, body: dict | None = None) -> dict:
+    """选定城市（GUI 三级联动）：按 code 取本地城市库（名称/拼音/坐标）写入 location.json。"""
+    body = body or {}
+    code = str(body.get("code", ""))
+    row = _city_by_code(code) or _city_with_coords(code)
+    if row is None:
+        return {"ok": False, "error": "未知城市 code"}, 400
+    _code, name, _parent, pinyin, lat, lon = row
+    set_city(name, pinyin or "", lat, lon, _code)
+    return {"ok": True, "city": get_location()}
+
+
+def profile_locate(app, body: dict | None = None) -> dict:
+    """定位授权：浏览器 geolocation 坐标 → 最近城市条目（区级坐标）写入 location.json。"""
+    body = body or {}
+    try:
+        lat, lon = float(body.get("lat")), float(body.get("lon"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "无效坐标"}, 400
+    row = _nearest_city(lat, lon)
+    if row is None:
+        return {"ok": False, "error": "城市库不可用"}, 500
+    _code, name, _parent, pinyin, clat, clon = row
+    set_city(name, pinyin or "", clat, clon, _code)
+    return {"ok": True, "code": _code, "name": name, "city": get_location()}
 
 
 def profile_undo(app, body: dict | None = None) -> dict:

@@ -177,50 +177,12 @@
 
           <div class="form-inline">
             <label>所在城市</label>
-            <select id="citySelect">
-              <option value="">— 请选择城市 —</option>
-              <option value="Beijing">北京</option>
-              <option value="Shanghai">上海</option>
-              <option value="Guangzhou">广州</option>
-              <option value="Shenzhen">深圳</option>
-              <option value="Hangzhou">杭州</option>
-              <option value="Chengdu">成都</option>
-              <option value="Chongqing">重庆</option>
-              <option value="Wuhan">武汉</option>
-              <option value="Xian">西安</option>
-              <option value="Nanjing">南京</option>
-              <option value="Tianjin">天津</option>
-              <option value="Suzhou">苏州</option>
-              <option value="Zhengzhou">郑州</option>
-              <option value="Changsha">长沙</option>
-              <option value="Qingdao">青岛</option>
-              <option value="Shenyang">沈阳</option>
-              <option value="Ningbo">宁波</option>
-              <option value="Kunming">昆明</option>
-              <option value="Dalian">大连</option>
-              <option value="Xiamen">厦门</option>
-              <option value="Hefei">合肥</option>
-              <option value="Fuzhou">福州</option>
-              <option value="Harbin">哈尔滨</option>
-              <option value="Jinan">济南</option>
-              <option value="Wuxi">无锡</option>
-              <option value="Changchun">长春</option>
-              <option value="Wenzhou">温州</option>
-              <option value="Shijiazhuang">石家庄</option>
-              <option value="Nanning">南宁</option>
-              <option value="Guiyang">贵阳</option>
-              <option value="Nanchang">南昌</option>
-              <option value="Taiyuan">太原</option>
-              <option value="Xiaodian">太原小店区</option>
-              <option value="Jining" selected>集宁（乌兰察布）</option>
-              <option value="Hohhot">呼和浩特</option>
-              <option value="Lanzhou">兰州</option>
-              <option value="Urumqi">乌鲁木齐</option>
-              <option value="Haikou">海口</option>
-              <option value="Yinchuan">银川</option>
-              <option value="Xining">西宁</option>
-            </select>
-            <button class="btn btn-secondary btn-sm" id="locateBtn">📍 定位授权</button>
+            <div style="flex:1;display:flex;gap:8px;align-items:center">
+              <select id="provinceSelect" style="flex:1.2"><option value="">— 省 —</option></select>
+              <select id="citySelect" style="flex:1"><option value="">— 市 —</option></select>
+              <select id="districtSelect" style="flex:1"><option value="">— 区/县 —</option></select>
+              <button class="btn btn-secondary btn-sm" id="locateBtn">📍 定位授权</button>
+            </div>
           </div>
 
           <div class="form-inline" style="margin-top:18px">
@@ -871,17 +833,6 @@
     prevAvatar = "";
   });
 
-  /* 定位授权（demo：模拟） */
-  document.getElementById("locateBtn").addEventListener("click", function () {
-    this.textContent = "⏳ 定位中…";
-    var btn = this;
-    setTimeout(function () {
-      document.getElementById("citySelect").value = "Jining";
-      btn.textContent = "✅ 已定位：集宁";
-      setTimeout(function () { btn.textContent = "📍 定位授权"; }, 2500);
-    }, 1200);
-  });
-
   /* opencode 优化（demo：占位） */
   document.getElementById("opencodeRun").addEventListener("click", function () {
     this.textContent = "⏳ 会话进行中…";
@@ -951,7 +902,7 @@
         });
       }
     }
-    if (d.city) { var sel = document.getElementById("citySelect"); if (sel) sel.value = d.city; }
+    if (d.location && d.location.code) { highlightCity(d.location.code); }
     if (d.habits && d.habits.length) {
       var hb = document.getElementById("habitInput");
       if (hb) {
@@ -1032,10 +983,9 @@
         if (ph.indexOf("助理怎么说话") >= 0) lang = ta.value;
       });
       identity = { address: address, assistant_name: aname, role: role, language: lang };
-      var city = document.getElementById("citySelect") ? document.getElementById("citySelect").value : "";
       var habitInput = document.getElementById("habitInput");
       var habits = habitInput ? tagsOf(habitInput.parentElement.parentElement.querySelector(".tag-list")) : [];
-      var body = { identity: identity, city: city, habits: habits };
+      var body = { identity: identity, habits: habits };
       api.post("/api/profile", body).then(function () {
         if (text === "保存并生成AGENTS.md") return api.post("/api/agents/render");
       }).then(function () {
@@ -1080,6 +1030,73 @@
   var pwdSave = null;
   $$("#advModal .btn-primary").forEach(function (b) {
     if (b.dataset && b.dataset.pwd) pwdSave = b;
+  });
+
+  /* 城市三级联动（cities.json：省 → 市 → 区/县，选中即保存） */
+  var CITY_DB = [];
+  var selP = document.getElementById("provinceSelect");
+  var selC = document.getElementById("citySelect");
+  var selD = document.getElementById("districtSelect");
+
+  function fillSel(sel, items, selCode) {
+    sel.innerHTML = '<option value="">— 请选择 —</option>';
+    items.forEach(function (r) {
+      var o = document.createElement("option");
+      o.value = r[0];
+      o.textContent = r[1];
+      if (r[0] === selCode) o.selected = true;
+      sel.appendChild(o);
+    });
+  }
+  function byParent(p) { return CITY_DB.filter(function (r) { return r[2] === p; }); }
+  function byCode(c) {
+    for (var i = 0; i < CITY_DB.length; i++) if (CITY_DB[i][0] === c) return CITY_DB[i];
+    return null;
+  }
+  function highlightCity(code) {
+    var row = byCode(code);
+    if (!row) return;
+    var chain = [code];
+    while (row && row[2]) { row = byCode(row[2]); if (row) chain.unshift(row[0]); }
+    fillSel(selP, byParent(""), chain[0] || "");
+    if (chain[1]) fillSel(selC, byParent(chain[0]), chain[1]);
+    if (chain[2]) fillSel(selD, byParent(chain[1]), chain[2]);
+  }
+  function currentCode() {
+    if (selD.value) return selD.value;
+    if (selC.value) return selC.value;
+    return selP.value;
+  }
+  fetch("/static/cities.json").then(function (r) { return r.json(); }).then(function (d) {
+    CITY_DB = d;
+    fillSel(selP, byParent(""), "");
+  }).catch(function () {});
+  [selP, selC, selD].forEach(function (sel) {
+    sel.addEventListener("change", function () {
+      if (sel === selP) { fillSel(selC, byParent(selP.value), ""); selD.innerHTML = '<option value="">— 区/县 —</option>'; }
+      if (sel === selC) { fillSel(selD, byParent(selC.value), ""); }
+      if (!currentCode()) return;
+      api.post("/api/profile/city", { code: currentCode() }).catch(function (e) { alert(e.message); });
+    });
+  });
+
+  /* 定位授权：geolocation → 最近城市 */
+  var locateBtn = document.getElementById("locateBtn");
+  locateBtn.addEventListener("click", function () {
+    if (!navigator.geolocation) { locateBtn.textContent = "❌ 浏览器不支持定位"; return; }
+    locateBtn.textContent = "⏳ 定位中…";
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      api.post("/api/profile/locate", { lat: pos.coords.latitude, lon: pos.coords.longitude })
+        .then(function (d) {
+          highlightCity(d.code);
+          locateBtn.textContent = "✅ 已定位：" + d.name;
+          setTimeout(function () { locateBtn.textContent = "📍 定位授权"; }, 3000);
+        })
+        .catch(function (e) { locateBtn.textContent = "❌ 定位失败：" + e.message; });
+    }, function () {
+      locateBtn.textContent = "❌ 定位失败，请手动选择";
+      setTimeout(function () { locateBtn.textContent = "📍 定位授权"; }, 3000);
+    }, { timeout: 8000, maximumAge: 600000 });
   });
 })();
 </script>

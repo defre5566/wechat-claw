@@ -2,6 +2,9 @@
 
 - fetch_weather / fetch_pollen：实时抓取（各带 3 次重试）
 - get_weather：带 TTL 缓存的天气（跨模块共享，默认 30 分钟）
+
+天气城市优先级：location.json 坐标（区级基准，选定/定位时写入）
+→ geocoding 中文名 → 拼音（en）兜底 → 回退 DEFAULT_LOC（北京）。
 """
 from __future__ import annotations
 
@@ -10,10 +13,10 @@ import time
 import urllib.parse
 import urllib.request
 
+from .location import get_location
 from .locations import DEFAULT_LOC
 from .io import shared_load, shared_save
 
-CITY = "Jining,Ulanqab,China"
 GEO_API = "https://geocoding-api.open-meteo.com/v1/search"
 WEATHER_API = "https://api.open-meteo.com/v1/forecast"
 WEATHER_CODES = {
@@ -47,21 +50,34 @@ def http_get_json(url: str, timeout: int = 15, attempts: int = 3, delay: float =
     return last
 
 
-def fetch_weather() -> str:
-    """Open-Meteo：地理编码 + forecast，weathercode 映射。返回"集宁 ☀️ 晴 22°C"。"""
-    lat, lon = DEFAULT_LOC
-    name = "集宁"
-    geo = http_get_json(f"{GEO_API}?{urllib.parse.urlencode({'name': CITY, 'count': 1, 'language': 'zh'})}")
-    if geo and geo.get("results"):
-        g = geo["results"][0]
-        lat, lon = g["latitude"], g["longitude"]
-        name = g.get("name") or "集宁"
+def _weather_at(lat: float, lon: float, name: str) -> str:
+    """按坐标查 Open-Meteo forecast，返回"名称 ☀️ 晴 22°C"；失败返回名称+获取失败。"""
     w = http_get_json(f"{WEATHER_API}?latitude={lat}&longitude={lon}&current_weather=true")
     if not w or "current_weather" not in w:
         return f"{name} ⛅ 天气获取失败"
     cw = w["current_weather"]
     emoji, desc = WEATHER_CODES.get(cw.get("weathercode", 0), ("☀️", "晴"))
     return f"{name} {emoji} {desc} {round(cw.get('temperature', 0))}°C"
+
+
+def fetch_weather() -> str:
+    """按用户位置查天气。优先级：坐标 → geocoding（中文名 → 拼音）→ 回退北京。"""
+    loc = get_location()
+    lat, lon = loc.get("lat"), loc.get("lon")
+    name = str(loc.get("city", "")) or "北京"
+
+    if lat is not None and lon is not None:
+        return _weather_at(lat, lon, name)
+
+    # 无坐标（未配置/选定失败）：geocoding 中文名 → 拼音（en）→ 回退默认
+    for query in (loc.get("city"), loc.get("en")):
+        if not query:
+            continue
+        geo = http_get_json(f"{GEO_API}?{urllib.parse.urlencode({'name': query, 'count': 1, 'language': 'zh'})}")
+        if geo and geo.get("results"):
+            g = geo["results"][0]
+            return _weather_at(g["latitude"], g["longitude"], name)
+    return _weather_at(*DEFAULT_LOC, "北京")
 
 
 def fetch_pollen(today=None) -> str:

@@ -129,6 +129,7 @@ EOF
 ├── vendor/wechat_agent_sdk/        # wechat-agent-sdk 0.2.1 全量快照（补丁预打）
 ├── vendor/nssm/                    # NSSM 2.24 二进制（Windows 服务化，public domain）
 ├── web/                            # 初始化向导 + 管理后台（launcher/wizard/handlers/static）
+│   └── static/cities.json           # 城市库（省市区 + 拼音 + 中心坐标，来源 xiangyuecn/AreaCity-JsSpider-StatsGov，MIT）
 ├── .config/                        # 用户配置目录（部署后生成，备份 = 打包此目录）
 ├── patches/apply_patches.py        # SDK 补丁（生产 pip 安装重打用；分发侧作校验器）
 ├── docs/                           # 开发文档 01-04
@@ -147,4 +148,5 @@ EOF
 ## 规划中
 
 - **web 初始化向导与管理后台**：已实现（web/，`web/start.sh` / `web/start.bat` 启动）；P1 管理后台增强（模块源下载、日志可视化、schema 表单）规划中
+  - 城市库与定位授权已实现：`web/static/cities.json`（省市区三级 + 拼音 + 中心坐标，天气按区级坐标查询、定位按最近区县匹配；数据源自 [xiangyuecn/AreaCity-JsSpider-StatsGov](https://github.com/xiangyuecn/AreaCity-JsSpider-StatsGov)（MIT，原始数据民政部/国家地名信息库/统计局/高德/腾讯，2026-04-03 版），仅此文件为第三方派生数据）
 - **可执行文件打包**：单文件产物 + 向导装配（README 方式 B）
