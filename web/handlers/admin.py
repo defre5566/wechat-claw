@@ -204,6 +204,12 @@ def agents_render(app, body: dict | None = None) -> dict:
 
 # ---------- 用户配置（config.yaml 用户段） ----------
 
+def schema_get(app, body: dict | None = None) -> dict:
+    """返回 config 用户段 schema（前端按此渲染高级设置表单）。"""
+    from web.schema.config_schema import get_schema
+    return {"ok": True, "schema": get_schema()}
+
+
 def settings_get(app, body: dict | None = None) -> dict:
     import yaml
     cfg = {}
@@ -219,10 +225,13 @@ def settings_get(app, body: dict | None = None) -> dict:
 
 def settings_set(app, body: dict | None = None) -> dict:
     import yaml
+    from web.schema.config_schema import validate_settings
     body = body or {}
     new_cfg = body.get("settings", {})
-    # 只接受用户段键
-    clean = {k: v for k, v in new_cfg.items() if k in DEFAULTS_USER}
+    result = validate_settings(new_cfg)
+    if not result["ok"]:
+        return {"ok": False, "errors": result["errors"]}, 400
+    clean = result["clean"]
     try:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(

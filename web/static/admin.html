@@ -352,35 +352,9 @@
       <button class="modal-close" data-close="advModal">✕</button>
     </div>
 
-    <div class="modal-section">
+    <div class="modal-section" id="schemaConfig">
       <div class="modal-section-title">运行配置</div>
-
-      <div class="form-row">
-        <label>opencode 命令路径</label>
-        <input type="text" value="opencode">
-        <div class="form-hint">默认为 PATH 中的 opencode；自定义安装可填绝对路径</div>
-      </div>
-      <div class="form-row">
-        <label>ACP 端口</label>
-        <input type="number" value="45678">
-        <div class="form-hint">opencode 子进程端口（固定，避免与 4096/8650/9898 冲突）</div>
-      </div>
-      <div class="form-row">
-        <label>文件直发目录</label>
-        <textarea rows="3" style="width:100%">~/文档
-~/下载
-~/桌面
-~/图片
-~/音乐
-~/视频
-~/公共</textarea>
-        <div class="form-hint">每行一个目录；这些目录下的文件微信发送免确认</div>
-      </div>
-      <div class="form-row">
-        <label>加密密钥路径</label>
-        <input type="text" value=".config/crypto.key" readonly class="input-readonly">
-        <div class="form-hint">只读：密钥自动生成，丢失将无法解密已加密的隐私数据</div>
-      </div>
+      <div style="color:var(--muted);font-size:13px">加载中…</div>
     </div>
 
     <div class="modal-section">
@@ -1030,23 +1004,73 @@
     }
   });
 
-  /* 高级设置弹窗：保存 → settings + 守则 + 密码 */
-  var advSave = null;
-  $$("#advModal .btn-primary").forEach(function (b) {
-    if (b.textContent.indexOf("保存") >= 0) advSave = b;
-  });
-  if (advSave) advSave.addEventListener("click", function () {
-    var settings = {};
-    $$("#advModal input").forEach(function (inp) {
-      var lab = inp.closest(".form-row");
-      if (!lab) return;
-      var l = lab.querySelector("label");
-      if (!l) return;
-      var key = l.textContent.trim();
-      if (key === "opencode 命令路径") settings.acp = Object.assign(settings.acp || {}, { command: inp.value });
-      if (key === "ACP 端口") settings.acp = Object.assign(settings.acp || {}, { port: parseInt(inp.value, 10) });
+  /* schema 表单：高级设置运行配置按 schema 渲染 */
+  function renderSchema(schema, settings) {
+    var box = document.getElementById("schemaConfig");
+    if (!box) return;
+    box.innerHTML = '<div class="modal-section-title">运行配置</div>';
+    schema.forEach(function (group) {
+      group.fields.forEach(function (f) {
+        var row = document.createElement("div");
+        row.className = "form-row";
+        row.dataset.group = group.group;
+        row.dataset.key = f.key;
+        var val = (settings[group.group] && settings[group.group][f.key] !== undefined)
+          ? settings[group.group][f.key] : f.default;
+        var control = "";
+        if (f.type === "number") {
+          control = '<input type="number" value="' + val + '">';
+        } else if (f.type === "list") {
+          control = '<textarea rows="' + Math.min(6, (val || []).length + 1) + '" style="width:100%">' +
+            (val || []).join("\n") + '</textarea>';
+        } else if (f.type === "readonly") {
+          control = '<input type="text" value="' + val + '" readonly class="input-readonly">';
+        } else {
+          control = '<input type="text" value="' + (val === null || val === undefined ? "" : val) + '">';
+        }
+        row.innerHTML = '<label>' + f.label + '</label>' + control +
+          (f.hint ? '<div class="form-hint">' + f.hint + '</div>' : "");
+        box.appendChild(row);
+      });
     });
-    api.post("/api/admin/settings", { settings: settings }).catch(function (e) { alert(e.message); });
+  }
+  function collectSchemaSettings() {
+    var settings = {};
+    var rows = document.querySelectorAll("#schemaConfig .form-row");
+    rows.forEach(function (row) {
+      var g = row.dataset.group, k = row.dataset.key;
+      var ctrl = row.querySelector("input, textarea");
+      if (!ctrl) return;
+      var val;
+      if (ctrl.tagName === "TEXTAREA") {
+        val = ctrl.value.split("\n").map(function (s) { return s.trim(); }).filter(Boolean);
+      } else if (ctrl.type === "number") {
+        val = parseInt(ctrl.value, 10);
+      } else {
+        val = ctrl.value;
+      }
+      if (!settings[g]) settings[g] = {};
+      settings[g][k] = val;
+    });
+    return settings;
+  }
+  api.get("/api/admin/schema").then(function (sd) {
+    api.get("/api/admin/settings").then(function (st) {
+      renderSchema(sd.schema, st.settings || {});
+    });
+  }).catch(function () {});
+
+  /* 高级设置保存：schema 收集 → settings 提交（校验错误提示） */
+  var advSaveBtn = null;
+  document.querySelectorAll("#advModal .btn-primary").forEach(function (b) {
+    if (b.textContent.indexOf("保存") >= 0 && !b.dataset.pwd) advSaveBtn = b;
+  });
+  if (advSaveBtn) advSaveBtn.addEventListener("click", function () {
+    api.post("/api/admin/settings", { settings: collectSchemaSettings() }).then(function () {
+      var t = advSaveBtn.innerHTML;
+      advSaveBtn.innerHTML = "已保存 ✓";
+      setTimeout(function () { advSaveBtn.innerHTML = t; }, 1400);
+    }).catch(function (e) { alert(e.message); });
   });
 
   /* 改密码 */

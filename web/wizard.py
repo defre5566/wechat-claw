@@ -137,6 +137,7 @@ ROUTES = {
     ("POST", "/api/agents/render"): _h("admin", "agents_render", True),
     ("POST", "/api/profile/avatar"): _h("admin", "avatar_set", True),
     ("POST", "/api/profile/avatar/undo"): _h("admin", "avatar_undo", True),
+    ("GET", "/api/admin/schema"): _h("admin", "schema_get", True),
     ("GET", "/api/admin/settings"): _h("admin", "settings_get", True),
     ("POST", "/api/admin/settings"): _h("admin", "settings_set", True),
     ("GET", "/api/admin/logs"): _h("admin", "logs_tail", True),
