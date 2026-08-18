@@ -235,15 +235,34 @@ def settings_set(app, body: dict | None = None) -> dict:
 
 # ---------- 日志 ----------
 
+def _log_match(line: str, level: str, module: str, keyword: str) -> bool:
+    """过滤：level（INFO/WARN/ERROR 子串，JSON Lines 与普通行通用）+ module + keyword。"""
+    if level:
+        # "WARN" 同时命中 "WARNING"（普通行）与 "level": "WARN"（JSON 行）
+        if level.upper() not in line.upper():
+            return False
+    if module and module not in line:
+        return False
+    if keyword and keyword not in line:
+        return False
+    return True
+
+
 def logs_tail(app, body: dict | None = None) -> dict:
+    """日志尾部 + 过滤：level/module/keyword（正则子串，大小写不敏感 level）。"""
     body = body or {}
     n = int(body.get("tail", 200))
+    level = str(body.get("level", "")).strip()
+    module = str(body.get("module", "")).strip()
+    keyword = str(body.get("keyword", "")).strip()
     log_file = PROJECT_ROOT / "logs" / "system.log"
     lines = []
     if log_file.is_file():
         try:
             text = log_file.read_text(encoding="utf-8", errors="replace")
-            lines = text.splitlines()[-n:]
+            lines = [ln for ln in text.splitlines()
+                     if _log_match(ln, level, module, keyword)]
+            lines = lines[-n:]
         except OSError:
             pass
     return {"ok": True, "lines": lines}

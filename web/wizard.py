@@ -140,6 +140,7 @@ ROUTES = {
     ("GET", "/api/admin/settings"): _h("admin", "settings_get", True),
     ("POST", "/api/admin/settings"): _h("admin", "settings_set", True),
     ("GET", "/api/admin/logs"): _h("admin", "logs_tail", True),
+    ("POST", "/api/admin/logs"): _h("admin", "logs_tail", True),
     ("GET", "/api/admin/modules"): _h("admin", "modules_list", True),
     ("POST", "/api/admin/modules/toggle"): _h("admin", "modules_toggle", True),
     ("POST", "/api/admin/modules/install"): _h("admin", "modules_install", True),

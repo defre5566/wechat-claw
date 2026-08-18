@@ -430,7 +430,17 @@
       <h3>运行日志</h3>
       <button class="modal-close" data-close="logModal">✕</button>
     </div>
-    <div class="log-console" style="max-height:320px"><span class="ok">02:11:23 [info]</span> [push] HTTP 入口 http://127.0.0.1:9898/push
+        <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+      <select id="logLevel" style="width:110px">
+        <option value="">全部级别</option>
+        <option value="INFO">INFO</option>
+        <option value="WARN">WARN</option>
+        <option value="ERROR">ERROR</option>
+      </select>
+      <input type="text" id="logKeyword" placeholder="关键词过滤…" style="flex:1">
+      <button class="btn btn-secondary btn-sm" id="logRefresh">刷新</button>
+    </div>
+<div class="log-console" style="max-height:320px"><span class="ok">02:11:23 [info]</span> [push] HTTP 入口 http://127.0.0.1:9898/push
 <span class="ok">02:11:23 [info]</span> 微信桥接 v2 启动（5h 会话窗 / 串行 / 微信确认权限）
 <span class="ok">02:12:01 [info]</span> [weixin] 已连接 iLink
 <span class="ok">02:12:01 [info]</span> [acp] Connection initialized (wechat-confirm mode)
@@ -958,17 +968,24 @@
     });
   }).catch(function () {});
 
-  api.get("/api/admin/logs?tail=50").then(function (d) {
-    var box = document.getElementById("logModal") ? document.querySelector("#logModal .log-console") : null;
-    if (box && d.lines && d.lines.length) {
+  function loadLogs() {
+    var box = document.querySelector("#logModal .log-console");
+    if (!box) return;
+    var level = document.getElementById("logLevel") ? document.getElementById("logLevel").value : "";
+    var keyword = document.getElementById("logKeyword") ? document.getElementById("logKeyword").value.trim() : "";
+    api.post("/api/admin/logs", { tail: 200, level: level, keyword: keyword }).then(function (d) {
       box.innerHTML = "";
-      d.lines.forEach(function (l) {
+      (d.lines || []).forEach(function (l) {
         var div = document.createElement("div");
         div.textContent = l;
         box.appendChild(div);
       });
-    }
-  }).catch(function () {});
+      box.scrollTop = box.scrollHeight;
+    }).catch(function () {});
+  }
+  var logRefresh = document.getElementById("logRefresh");
+  if (logRefresh) logRefresh.addEventListener("click", loadLogs);
+  api.get("/api/admin/logs?tail=50").then(loadLogs).catch(function () {});
 
   /* 保存按钮：收集所在卡片字段提交 */
   document.addEventListener("click", function (e) {
