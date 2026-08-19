@@ -92,7 +92,7 @@ EOF
 |---|---|
 | [AGENTS.md](AGENTS.md) | 对话 agent 系统提示**模板**（身份/守则/安全红线占位符） |
 | [AGENTS-example.md](AGENTS-example.md) | 填好默认中立人设的**参考实例**，照此客制化自己的 AGENTS.md |
-| [opencode.jsonc.example](opencode.jsonc.example) | 对话 agent **权限配置**（deny 四项 token/密钥），复制为项目根 `opencode.jsonc` 生效 |
+| [opencode.jsonc.example](opencode.jsonc.example) | 对话 agent **权限配置**（deny 五项 token/密钥），复制为项目根 `opencode.jsonc` 生效 |
 
 ### 4. 守护进程
 
@@ -109,9 +109,9 @@ EOF
 
 ## 安全模型
 
-- **deny 四项**：对话 agent 不可读 `modules/**/token`、`agent-SDK/push_token`、`anniversaries.json.enc`、`.config/crypto.key`、`.config/admin.password`（opencode.jsonc.example 默认配置）
+- **deny 五项**：对话 agent 不可读 `modules/**/token`、`agent-SDK/push_token`、`anniversaries.json.enc`、`.config/crypto.key`、`.config/admin.password`、`~/.wechat-agent-sdk/accounts.json`（opencode.jsonc.example 默认配置）
 - **文件发送三级**：个人目录直发 / 其余路径微信确认（30s 无回复拒绝）/ token 密钥类硬拒（bridge/paths.py 单点执行，路径规范化防 `../` 与符号链接绕过）
-- **/push 鉴权**：Bearer token sha256 命中模块索引哈希放行，401 记日志（IP + token 前 4 位）
+- **/push 鉴权**：Bearer token 常量时间比较 + sha256 命中模块索引哈希放行，401 记日志（仅 IP，不记 token 片段）
 - **资源保护**：/push body 上限 100MB（413）、队列有界（满 503）
 - **S1 防护**：会话失效 → critical 日志 + 非零退出 → systemd StartLimit 终止循环重启
 - **隐私数据**：AES-GCM 加密存储（common/crypto.py），密钥 chmod 600 + deny

@@ -141,8 +141,26 @@ def profile_locate(app, body: dict | None = None) -> dict:
     return {"ok": True, "code": _code, "name": name, "city": get_location()}
 
 
+# 图片魔数（拒非图片内容被存为 .png）
+_IMAGE_MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", "image/png", ".png"),
+    (b"\xff\xd8\xff", "image/jpeg", ".jpg"),
+    (b"GIF87a", "image/gif", ".gif"),
+    (b"GIF89a", "image/gif", ".gif"),
+    (b"RIFF", "image/webp", ".webp"),  # RIFF....WEBP
+)
+
+
+def _detect_image(raw: bytes) -> tuple[str, str] | None:
+    """按魔数识别图片类型，返回 (content_type, ext)；非图片返回 None。"""
+    for magic, ctype, ext in _IMAGE_MAGIC:
+        if raw.startswith(magic):
+            return ctype, ext
+    return None
+
+
 def avatar_set(app, body: dict | None = None) -> dict:
-    """上传头像：base64 data URL → .config/avatar.png（写前备份 prev 供撤销）。"""
+    """上传头像：base64 data URL → 校验魔数 → .config/avatar.png（写前备份 prev）。"""
     data_url = (body or {}).get("data", "")
     if not data_url.startswith("data:image/"):
         return {"ok": False, "error": "无效图片数据"}, 400
@@ -152,12 +170,15 @@ def avatar_set(app, body: dict | None = None) -> dict:
         return {"ok": False, "error": "图片解码失败"}, 400
     if len(raw) > MAX_AVATAR_BYTES:
         return {"ok": False, "error": "图片超过 2MB"}, 413
+    detected = _detect_image(raw)
+    if detected is None:
+        return {"ok": False, "error": "非有效图片（魔数校验失败）"}, 400
     try:
         AVATAR_FILE.parent.mkdir(parents=True, exist_ok=True)
         if AVATAR_FILE.is_file():
             AVATAR_PREV.write_bytes(AVATAR_FILE.read_bytes())
         AVATAR_FILE.write_bytes(raw)
-        return {"ok": True, "size": len(raw)}
+        return {"ok": True, "size": len(raw), "type": detected[0]}
     except OSError as e:
         return {"ok": False, "error": str(e)}, 500
 

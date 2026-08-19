@@ -46,6 +46,15 @@ def _req(port: int, method: str, path: str, body: dict | None = None,
 
 
 def main() -> int:
+    # 启动时快照：已部署实例（.config 已存在）拒绝执行——
+    # selftest 末尾会 rmtree(ROOT/.config)，在真实部署上误跑会丢 crypto.key/密码/用户数据
+    existing_config = (ROOT / ".config").exists()
+    if existing_config and os.environ.get("WC_SELFTEST_FORCE") != "1":
+        print("NG: 检测到已存在的 .config（疑似已部署实例）。")
+        print("    selftest 末尾会清空 .config，在真实部署上误跑会永久丢失 crypto.key/密码/用户数据。")
+        print("    如确认要在本机跑，请设环境变量 WC_SELFTEST_FORCE=1 后重试。")
+        return 1
+
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp)
         env = dict(os.environ)

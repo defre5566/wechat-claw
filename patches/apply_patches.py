@@ -21,6 +21,7 @@ SITE = pathlib.Path(sysconfig.get_paths()["purelib"])
 SDK = VENDOR if "--vendor" in sys.argv else SITE / "wechat_agent_sdk"
 CDN = SDK / "media" / "cdn.py"
 TRANSPORT = SDK / "transport.py"
+STORAGE = SDK / "account" / "storage.py"
 
 PATCHES = [
     (
@@ -57,6 +58,20 @@ PATCHES = [
         "import httpx\nfrom urllib.parse import quote",
         "from urllib.parse import quote",
         "④ cdn.py import quote（③ 依赖的符号）",
+    ),
+    (
+        STORAGE,
+        "        self._file.write_text(json.dumps(self._data or {}, indent=2))",
+        (
+            "        self._file.write_text(json.dumps(self._data or {}, indent=2))\n"
+            "        # 敏感凭据：收紧到 0600（wechat-claw 补丁；默认 umask 644 可被本机其他用户读取）\n"
+            "        try:\n"
+            "            self._file.chmod(0o600)\n"
+            "        except OSError:\n"
+            "            pass"
+        ),
+        "self._file.chmod(0o600)",
+        "⑤ storage.py accounts.json chmod 0600",
     ),
 ]
 
@@ -112,7 +127,7 @@ def main() -> int:
             all_ok = False
 
     # 语法校验
-    for file in (CDN, TRANSPORT):
+    for file in (CDN, TRANSPORT, STORAGE):
         try:
             py_compile.compile(str(file), doraise=True)
         except py_compile.PyCompileError as e:

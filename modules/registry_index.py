@@ -2,14 +2,26 @@
 
 真源 = 各模块自己的 module.json；本模块只是生成物（每次调用实时扫描，
 模块目录增删自动反映，基础设施不随模块增长而膨胀）。供 scheduler / push_server 读取。
+
+短 TTL 缓存（默认 2s）避免 /push 鉴权每请求全量扫盘；register.set_enabled / uninstall
+调用 invalidate() 主动清缓存，保证后台启停后下个请求即时生效（守住"实时扫描"语义）。
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import time
 from pathlib import Path
 
 MODULES_DIR = Path(__file__).resolve().parent
+
+_CACHE_TTL = 2.0
+_cache: dict = {"ts": 0.0, "index": {}}
+
+
+def invalidate() -> None:
+    """清缓存（register 启停/卸载后调用，使下个 build_index() 重新扫描）。"""
+    _cache["ts"] = 0.0
 
 
 def _token_hash(name: str) -> str | None:
@@ -27,6 +39,9 @@ def build_index() -> dict:
 
     仅含 enabled=true 的模块（register.py 管理启停；缺失或 false = 关闭，不进 index）。
     """
+    now = time.monotonic()
+    if now - _cache["ts"] < _CACHE_TTL:
+        return _cache["index"]
     index: dict[str, dict] = {}
     for mod_dir in sorted(MODULES_DIR.iterdir()):
         if not mod_dir.is_dir():
@@ -50,6 +65,8 @@ def build_index() -> dict:
             "token_hash": _token_hash(name),
             "enabled": True,
         }
+    _cache["ts"] = time.monotonic()
+    _cache["index"] = index
     return index
 
 

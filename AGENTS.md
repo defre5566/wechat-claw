@@ -28,7 +28,8 @@
 ## 安全红线（不可协商，勿改）
 
 - 不读取/转发 token 与密钥文件（modules/**/token、agent-SDK/push_token、
-  anniversaries.json.enc、.config/crypto.key、.config/admin.password）
+  anniversaries.json.enc、.config/crypto.key、.config/admin.password、
+  ~/.wechat-agent-sdk/accounts.json）
 - 文件发送遵循三级规则：default 直发 / gate 微信确认（30s 无回复拒绝）/ reject 硬拒
 - 敏感路径不写入日志与推送内容
 

@@ -100,16 +100,21 @@ def _keep_ts_key(value, cutoff_ts: float) -> bool:
 
 
 def load_or_create_token() -> str:
-    """读取推送 token；不存在则生成随机 token 写入文件（0600，幂等）。"""
+    """读取推送 token；不存在则生成随机 token 写入文件（0600 原子创建，幂等）。"""
     if TOKEN_FILE.exists():
         tok = TOKEN_FILE.read_text().strip()
         if tok:
-            TOKEN_FILE.chmod(0o600)
+            try:
+                TOKEN_FILE.chmod(0o600)
+            except OSError:
+                pass
             return tok
     SDK_DIR.mkdir(parents=True, exist_ok=True)
     tok = secrets.token_hex(32)
-    TOKEN_FILE.write_text(tok)
-    TOKEN_FILE.chmod(0o600)
+    # O_CREAT|O_EXCL + 0600：原子创建，避免"先写后 chmod"短暂 644 窗口
+    fd = os.open(str(TOKEN_FILE), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(tok)
     print(f"[push] 已生成新 token: {TOKEN_FILE}")
     return tok
 

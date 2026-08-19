@@ -23,6 +23,11 @@ def _ensure_key() -> bytes:
         raw = KEY_FILE.read_bytes()
         if len(raw) == 32:
             return raw
+        # 密钥文件存在但长度异常（损坏/误改）：显式报错，避免静默重生成导致旧密文永久不可解
+        raise RuntimeError(
+            f"加密密钥文件长度异常（{len(raw)}B，期望 32B）：{KEY_FILE}。"
+            f"密钥若已丢失，旧密文无法解密；请删除旧密文后删除该文件重启以重新生成。"
+        )
     KEY_DIR.mkdir(parents=True, exist_ok=True)
     key = secrets.token_bytes(32)
     KEY_FILE.write_bytes(key)

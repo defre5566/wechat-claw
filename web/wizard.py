@@ -31,6 +31,21 @@ PORT = int(os.environ.get("WEB_PORT", "8650"))
 STATIC = RESOURCE_ROOT / "web" / "static"
 MAX_BODY = 1 * 1024 * 1024
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
+# 防 DNS rebinding / CSRF：Host 主机名白名单 + Origin/Referer 同源校验
+_ALLOWED_HOSTNAMES = {"127.0.0.1", "localhost", "[::1]", "::1"}
+
+
+def _origin_ok(header: str) -> bool:
+    """Origin/Referer 缺省放行（curl 不带）；存在则主机名须在白名单。"""
+    if not header:
+        return True
+    # 取 scheme://host[:port] 中的 host 部分
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(header).hostname or "").lower()
+    except Exception:
+        return False
+    return host in _ALLOWED_HOSTNAMES
 
 
 # ---------- 长任务 ----------
@@ -198,6 +213,16 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args) -> None:  # 静默 access log
         return
 
+    def _guard(self) -> bool:
+        """DNS rebinding / CSRF 防护：Host 主机名白名单 + Origin/Referer 同源。"""
+        host = (self.headers.get("Host", "") or "").split(":", 1)[0].lower()
+        if host not in _ALLOWED_HOSTNAMES:
+            return False
+        origin = self.headers.get("Origin", "") or self.headers.get("Referer", "")
+        if not _origin_ok(origin):
+            return False
+        return True
+
     # ---- 静态文件（realpath 防穿越） ----
 
     def _serve_static(self, rel: str) -> None:
@@ -220,6 +245,9 @@ class Handler(BaseHTTPRequestHandler):
     # ---- 入口 ----
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._guard():
+            self._json(403, {"ok": False, "error": "forbidden host/origin"})
+            return
         path = self.path.split("?")[0]
         if path == "/":
             self._serve_static("wizard.html")
@@ -249,6 +277,9 @@ class Handler(BaseHTTPRequestHandler):
         self._dispatch(route, None)
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._guard():
+            self._json(403, {"ok": False, "error": "forbidden host/origin"})
+            return
         path = self.path.split("?")[0]
         route = ROUTES.get(("POST", path))
         if route is None:

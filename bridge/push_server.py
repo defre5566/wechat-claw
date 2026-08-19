@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import http.server
 import json
 import logging
@@ -29,12 +30,15 @@ PUSH_AGENT_TYPES = {"reminder", "alert"}                          # 进 agent �
 
 
 def _token_valid(token: str, push_token: str) -> bool:
-    """Bearer/X-Token 命中 push_token 或 sha256 命中 registry 任一模块哈希。"""
-    if token and (token == push_token):
+    """Bearer/X-Token 命中 push_token 或 sha256 命中 registry 任一模块哈希。
+
+    常量时间比较（hmac.compare_digest）；模块侧比 sha256 摘要比对（命中 hash 不泄露 token）。
+    """
+    if token and hmac.compare_digest(token, push_token):
         return True
     if token:
         digest = hashlib.sha256(token.encode()).hexdigest()
-        return any(m.get("token_hash") == digest for m in build_index().values())
+        return any(hmac.compare_digest(m.get("token_hash") or "", digest) for m in build_index().values())
     return False
 
 
@@ -61,10 +65,7 @@ def start_push_server(push_queue: asyncio.Queue) -> http.server.ThreadingHTTPSer
             bearer = auth[7:] if auth.lower().startswith("bearer ") else ""
             token = bearer or xtoken
             if not _token_valid(token, push_token):
-                short = (token or "无")[:4]
-                log.warning(
-                    f"[push] 鉴权失败 ip={self.client_address[0]} token={short}****"
-                )
+                log.warning(f"[push] 鉴权失败 ip={self.client_address[0]}")
                 self._reply(401, {"ok": False, "error": "unauthorized"})
                 return
             try:

@@ -32,37 +32,47 @@ log = logging.getLogger("wechat-bridge")
 
 
 class PermissionGate:
-    """权限确认门：等待微信用户回复"允许/拒绝"。"""
+    """权限确认门：等待微信用户回复"允许/拒绝"。
+
+    per-conv 队列：同会话多个并发确认请求排队，回复"允许/拒绝"匹配队首 pending
+    future，避免后者覆盖前者导致前者 30s 超时默认拒绝。
+    """
 
     def __init__(self, send_func):
         self._send = send_func
-        self._pending: dict[str, asyncio.Future] = {}  # conversation_id -> future
+        self._pending: dict[str, list[asyncio.Future]] = {}  # conversation_id -> 队列
         self._lock = asyncio.Lock()
 
     def is_waiting(self, conversation_id: str) -> bool:
-        fut = self._pending.get(conversation_id)
-        return fut is not None and not fut.done()
+        q = self._pending.get(conversation_id)
+        return bool(q)
 
     async def resolve(self, conversation_id: str, text: str) -> bool:
-        """收到微信消息时调用；若存在等待中的确认且文本匹配，则完成。"""
+        """收到微信消息时调用；匹配队首 pending future 完成。"""
         async with self._lock:
-            fut = self._pending.get(conversation_id)
-            if fut is None or fut.done():
+            q = self._pending.get(conversation_id)
+            if not q:
+                return False
+            fut = q[0]
+            if fut.done():
+                q.pop(0)
                 return False
             t = text.strip().lower()
             if t in ("允许", "allow", "ok", "好的", "可以", "yes", "y"):
                 fut.set_result(True)
+                q.pop(0)
                 return True
             if t in ("拒绝", "deny", "no", "n", "不行", "不要"):
                 fut.set_result(False)
+                q.pop(0)
                 return True
             return False  # 不是确认回复，交给正常处理
 
     async def wait(self, conversation_id: str, prompt: str) -> bool:
         """发起确认：发消息问用户，等待回复（超时默认拒绝）。"""
+        fut = asyncio.get_running_loop().create_future()
         async with self._lock:
-            fut = asyncio.get_running_loop().create_future()
-            self._pending[conversation_id] = fut
+            self._pending.setdefault(conversation_id, []).append(fut)
         try:
             await self._send(conversation_id, prompt)
             try:
@@ -72,7 +82,14 @@ class PermissionGate:
                 return False
         finally:
             async with self._lock:
-                self._pending.pop(conversation_id, None)
+                q = self._pending.get(conversation_id)
+                if q:
+                    try:
+                        q.remove(fut)
+                    except ValueError:
+                        pass
+                    if not q:
+                        self._pending.pop(conversation_id, None)
 
 
 class ConfirmAcpAgent(AcpAgent):

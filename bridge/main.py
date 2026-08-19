@@ -57,6 +57,7 @@ def _setup_file_logging() -> None:
 _setup_file_logging()
 
 INBOX_DIR = WORKDIR / "inbox"
+MAX_SEND_FILE = 50 * 1024 * 1024  # _send_file 单文件上限 50MB（防超大文件 OOM）
 
 
 class BridgeCore:
@@ -99,6 +100,11 @@ class BridgeCore:
             conv, _ = targets_for_text("")
             if not conv:
                 log.warning("[push] 无目标会话，跳过文件发送")
+                return False
+            fsize = path.stat().st_size
+            if fsize > MAX_SEND_FILE:
+                log.warning(f"[push] 文件过大 ({fsize}B > {MAX_SEND_FILE}B)，拒绝发送: {path}")
+                await self.send_text(conv, f"文件过大（{fsize // 1024 // 1024}MB 超上限），未发送")
                 return False
             level = classify(path)
             if level == "reject":
@@ -167,26 +173,28 @@ class BridgeCore:
                 log.error(f"[push] agent 加工失败: {e}")
 
     async def push_worker(self) -> None:
-        """消费外部推送：串行走 semaphore，direct 直接发，agent 类进 agent。"""
+        """消费外部推送：direct/agent 走串行区，file 类不占串行区（gate 确认不阻塞推送）。"""
         while True:
             item = await self.push_queue.get()
-            async with self.semaphore:
-                try:
-                    ptype = item.get("type")
-                    text = item.get("text", "")
-                    if ptype == "file":
-                        await self._send_file(item.get("path", ""))
-                    elif ptype in PUSH_DIRECT_TYPES:
+            ptype = item.get("type")
+            try:
+                if ptype == "file":
+                    # 文件发送含 gate 确认（最长 30s），不占 semaphore，避免阻塞 direct/agent
+                    await self._send_file(item.get("path", ""))
+                elif ptype in PUSH_DIRECT_TYPES:
+                    async with self.semaphore:
                         from .state import targets_for_text
+                        text = item.get("text", "")
                         conv, text = targets_for_text(text)
                         if conv:
                             await self.send_with_retry(conv, text)
                         else:
                             log.warning("[push] 无目标会话，跳过 direct 推送（不入重试队列）")
-                    elif ptype in PUSH_AGENT_TYPES:
-                        await self._agent_process(text)
-                except Exception as e:
-                    log.error(f"[push] 处理失败: {e}")
+                elif ptype in PUSH_AGENT_TYPES:
+                    async with self.semaphore:
+                        await self._agent_process(item.get("text", ""))
+            except Exception as e:
+                log.error(f"[push] 处理失败: {e}")
             self.push_queue.task_done()
 
     async def retry_worker(self) -> None:
@@ -210,18 +218,18 @@ class BridgeCore:
 
     async def handle(self, conversation_id: str, text: str) -> None:
         if self.sessions.check(conversation_id) == "expired":
-            await self._transport.send_text(conversation_id, "（上一轮会话已超时归档，本消息开启新会话）", "")
+            await self.send_text(conversation_id, "（上一轮会话已超时归档，本消息开启新会话）")
         try:
             await self._transport.send_typing(conversation_id, start=True, context_token=self._last_token.get(conversation_id, ""))
             reply = await self._agent.chat(ChatRequest(conversation_id=conversation_id, text=text))
             out = reply.text if hasattr(reply, "text") else str(reply)
             if out:
-                await self._transport.send_text(conversation_id, out, "")
+                await self.send_text(conversation_id, out)  # 走 _last_token（与 send_with_retry 一致）
             await self._transport.send_typing(conversation_id, start=False, context_token=self._last_token.get(conversation_id, ""))
         except Exception as e:
             log.error(f"处理失败: {e}")
             await self._transport.send_typing(conversation_id, start=False, context_token=self._last_token.get(conversation_id, ""))
-            await self._transport.send_text(conversation_id, f"处理出错：{e}", "")
+            await self.send_text(conversation_id, f"处理出错：{e}")
 
     async def run(self) -> None:
         from .state import load_or_create_token, load_retry_queue

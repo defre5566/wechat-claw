@@ -35,7 +35,7 @@ def handle(app, body: dict | None = None) -> dict:
     body = body or {}
     results = {"config": _gen_config(), "key": _gen_key()}
 
-    # 管理密码（首次必填；重跑时可跳过）
+    # 管理密码：首次必填（开放期仅限向导完成前；已存在则可跳过）
     password = body.get("password", "")
     if password:
         if len(password) < auth.MIN_PASSWORD_LEN:
@@ -44,8 +44,13 @@ def handle(app, body: dict | None = None) -> dict:
         if not auth.set_password(password):
             return {"ok": False, "error": "密码写入失败", "results": results}, 500
         results["password"] = {"ok": True, "set": True}
+    elif not auth.password_exists():
+        # 首次配置必须设密码（杜绝"未设密码=永久开放期"被 CSRF 接管）
+        return {"ok": False,
+                "error": "首次配置必须设置管理密码（至少 6 位）",
+                "results": results}, 400
     else:
-        results["password"] = {"ok": True, "set": False, "exists": auth.password_exists()}
+        results["password"] = {"ok": True, "set": False, "exists": True}
 
     app.steps["config_gen"] = all(r.get("ok") for r in results.values())
     return {"ok": True, "results": results}

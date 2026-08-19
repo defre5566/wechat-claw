@@ -63,8 +63,11 @@ def register_module(
 
     token = secrets.token_hex(32)
     token_file = mod_dir / "token"
-    token_file.write_text(token)
-    token_file.chmod(0o600)
+    # O_CREAT|O_EXCL + 0600：原子创建，避免"先写后 chmod"短暂 644 窗口
+    import os
+    fd = os.open(str(token_file), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(token)
 
     data = _load_module_json(name)
     data.update({
@@ -112,7 +115,11 @@ def set_enabled(name: str, enabled: bool) -> bool:
         return False
     data = _load_module_json(name)
     data["enabled"] = bool(enabled)
-    return _save_module_json(name, data)
+    ok = _save_module_json(name, data)
+    if ok:
+        from modules.registry_index import invalidate
+        invalidate()
+    return ok
 
 
 def get_module(name: str) -> dict | None:
@@ -152,6 +159,8 @@ def uninstall(name: str) -> bool:
         return False
     try:
         shutil.rmtree(mod_dir)
+        from modules.registry_index import invalidate
+        invalidate()
         return True
     except OSError:
         return False

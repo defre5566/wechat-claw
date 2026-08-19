@@ -72,6 +72,11 @@ class JsonFileStorage(AccountStorage):
     def _save(self) -> None:
         self._state_dir.mkdir(parents=True, exist_ok=True)
         self._file.write_text(json.dumps(self._data or {}, indent=2))
+        # 敏感凭据：收紧到 0600（wechat-claw 补丁；默认 umask 644 可被本机其他用户读取）
+        try:
+            self._file.chmod(0o600)
+        except OSError:
+            pass
 
     def _get_account(self, account_id: str) -> dict:
         data = self._load()

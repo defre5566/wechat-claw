@@ -31,6 +31,7 @@ RUN_TIMEOUT = get_cfg("scheduler.run_timeout_seconds")  # 模块子进程超时�
 def cron_match(expr: str, now: datetime) -> bool:
     """标准 5 段 cron "分 时 日 月 周"；仅支持 * 与单个数字。
 
+    周段语义：0=周日、1=周一、…、6=周六（标准 cron，非 Python weekday）。
     非法表达式返回 False 并告警，绝不抛异常（否则 _tick 崩溃 → 全部调度静默终止）。
     """
     try:
@@ -53,32 +54,43 @@ def cron_match(expr: str, now: datetime) -> bool:
             and f(hour, now.hour)
             and (dom == "*" or int(dom) == now.day)
             and (month == "*" or int(month) == now.month)
-            and (dow == "*" or int(dow) == now.weekday())
+            # 周段：标准 cron（周日=0）→ Python weekday（周一=0）换算
+            and (dow == "*" or int(dow) == (now.weekday() + 1) % 7)
         )
     except ValueError:
         log.warning(f"[sched] cron 表达式非法: {expr!r}")
         return False
 
 
-def every_interval(every: str) -> int:
-    """解析 every 间隔为秒："1m"→60, "5m"→300, "1h"→3600。"""
+def every_interval(every: str) -> int | None:
+    """解析 every 间隔为秒："1m"→60, "5m"→300, "1h"→3600。
+
+    非法单位（如 "1d"）→ None（容错，绝不抛异常，否则 _tick 崩溃 → 全部调度静默终止）。
+    """
     s = every.strip()
-    if s.endswith("m"):
-        return int(s[:-1]) * 60
-    if s.endswith("h"):
-        return int(s[:-1]) * 3600
-    if s.endswith("s"):
-        return int(s[:-1])
-    return int(s)
+    try:
+        if s.endswith("m"):
+            return int(s[:-1]) * 60
+        if s.endswith("h"):
+            return int(s[:-1]) * 3600
+        if s.endswith("s"):
+            return int(s[:-1])
+        return int(s)
+    except ValueError:
+        log.warning(f"[sched] every 表达式非法: {every!r}（应形如 1m/5m/1h/30s）")
+        return None
 
 
 def _rand_offset(spec: str) -> int:
-    """解析 offset 配置：'random-5-50' → [5,50] 随机整数。"""
+    """解析 offset 配置：'random-5-50' → [5,50] 随机整数。非法 → 0。"""
     if spec.startswith("random-"):
         parts = spec.split("-")
         if len(parts) == 3:
-            lo, hi = int(parts[1]), int(parts[2])
-            return random.randint(lo, hi)
+            try:
+                lo, hi = int(parts[1]), int(parts[2])
+                return random.randint(lo, hi)
+            except ValueError:
+                log.warning(f"[sched] offset 表达式非法: {spec!r}")
     return 0
 
 
@@ -103,9 +115,9 @@ async def run_module(name: str, args: list[str] | None = None) -> int:
             return 2
         if proc.returncode == 0:
             if out:
-                log.info(f"[sched] {name} 完成: {out.decode()[:200]}")
+                log.info(f"[sched] {name} 完成: {out.decode(errors='replace')[:200]}")
             return 0
-        log.error(f"[sched] {name} 失败 rc={proc.returncode}: {err.decode()[-500:]}")
+        log.error(f"[sched] {name} 失败 rc={proc.returncode}: {err.decode(errors='replace')[-500:]}")
         return proc.returncode or 1
     except Exception as e:
         log.error(f"[sched] {name} spawn 失败: {e}")
@@ -118,13 +130,16 @@ def _rule_id(rule: dict, name: str, idx: int) -> str:
 
 
 async def scheduler() -> None:
-    """主循环：启动立即 tick 一次，此后每分钟 tick。"""
+    """主循环：启动立即 tick 一次，此后每分钟 tick。_tick 异常被吞（记日志不退出）。"""
     await _tick()
     while True:
         now = datetime.now()
         nxt = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
         await asyncio.sleep(max(1.0, (nxt - now).total_seconds() + 0.5))
-        await _tick()
+        try:
+            await _tick()
+        except Exception as e:  # noqa: BLE001  绝不让单个 tick 异常杀死调度循环
+            log.error(f"[sched] _tick 异常（已吞，下次 tick 继续）: {e}")
 
 
 async def _tick() -> None:
@@ -147,9 +162,12 @@ async def _tick() -> None:
             # ---- every 规则 ----
             # 周期触发 + 失败补发：失败按 retry 配置补发（≤max 次、间隔 retry_iv，补发窗口内
             # 只走 retry 判定，不按周期重复触发）；未配置补发或已超次 → 清除失败记录并推进
-            # last_ts 等下个周期，避免每分钟失败风暴与失败计数无限增长。
+            # per-rule last_ts 等下个周期，避免每分钟失败风暴与失败计数无限增长。
             if "every" in rule:
                 interval = every_interval(rule["every"])
+                if interval is None:
+                    continue  # 非法 every，已告警，跳过此规则
+                last_ts_key = f"{rid}_last_ts"
                 failed = mod_state.get(f"{rid}_failed")
                 if failed and failed.get("count", 0) > max_retry:
                     # 历史遗留/已超次记录：清除后回退周期判定
@@ -163,11 +181,11 @@ async def _tick() -> None:
                     )
                     if not due:
                         continue
-                elif now.timestamp() - mod_state.get("last_ts", 0) < interval:
+                elif now.timestamp() - mod_state.get(last_ts_key, 0) < interval:
                     continue
                 rc = await run_module(name)
                 if rc == 0:
-                    mod_state["last_ts"] = now.timestamp()
+                    mod_state[last_ts_key] = now.timestamp()
                     mod_state.pop(f"{rid}_failed", None)
                     log.info(f"[sched] {name}[{rid}] 完成（every {rule['every']}）")
                 else:
@@ -177,7 +195,7 @@ async def _tick() -> None:
                         log.warning(f"[sched] {name}[{rid}] 失败 rc={rc}（补发 {cnt}/{max_retry}）")
                     else:
                         mod_state.pop(f"{rid}_failed", None)
-                        mod_state["last_ts"] = now.timestamp()
+                        mod_state[last_ts_key] = now.timestamp()
                         log.warning(f"[sched] {name}[{rid}] 失败 rc={rc}（未配置补发/已超次，下个周期再试）")
                 changed = True
                 continue
@@ -218,13 +236,19 @@ async def _tick() -> None:
                 today = now.date().isoformat()
                 if done_key == today:
                     continue
-                # 补发：失败过且间隔满足且未超次数 → 允许重跑（不要求 cron 再次匹配）
+                # 失败记录：已超次（含 max_retry=0）→ 清除，恢复按 cron 自然触发
+                # （对齐文档"3 次后放弃，次日按 cron 自然重来"；避免永久停摆）
                 failed = mod_state.get(f"{rid}_failed")
+                if failed and failed.get("count", 0) >= max_retry:
+                    mod_state.pop(f"{rid}_failed", None)
+                    failed = None
+                    changed = True
+                # 补发：失败过且间隔满足且未超次数 → 允许重跑（不要求 cron 再次匹配）
                 is_retry = False
                 if failed:
                     age = now.timestamp() - failed.get("ts", 0)
-                    if failed.get("count", 0) >= max_retry or age < retry_iv:
-                        continue  # 超次放弃，或未到补发间隔
+                    if age < retry_iv:
+                        continue  # 未到补发间隔
                     is_retry = True
                 if is_retry or cron_match(rule["cron"], now):
                     rc = await run_module(name, rule.get("args"))
