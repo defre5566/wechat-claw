@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from bridge.config import PROJECT_ROOT
+from bridge.config import DEPLOY_ROOT, RESOURCE_ROOT
 
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 
@@ -56,7 +56,7 @@ StartLimitBurst=3
 [Service]
 Type=simple
 ExecStart={PROJECT_ROOT / '.venv' / 'bin' / 'python'} -m bridge.main
-WorkingDirectory={PROJECT_ROOT}
+WorkingDirectory={DEPLOY_ROOT}
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal
@@ -84,7 +84,7 @@ def _launchd() -> list[dict]:
         <string>bridge.main</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>{PROJECT_ROOT}</string>
+    <string>{DEPLOY_ROOT}</string>
     <key>KeepAlive</key>
     <true/>
     <key>ThrottleInterval</key>
@@ -108,14 +108,14 @@ def _nssm() -> list[dict]:
     if os.name != "nt":
         return [{"cmd": "Windows 平台才支持 nssm", "ok": False}]
     arch = "win64" if sys.maxsize > 2 ** 32 else "win32"
-    nssm = PROJECT_ROOT / "vendor" / "nssm" / f"{arch}.exe"
+    nssm = RESOURCE_ROOT / "vendor" / "nssm" / f"{arch}.exe"
     py = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
     if not nssm.is_file():
         return [{"cmd": f"nssm 缺失: {nssm}", "ok": False}]
     return _write_and_run(
         Path(f"nssm-{arch}.exe"), "",  # 占位（nssm 无需配置文件）
         [[str(nssm), "install", "wechat-bridge", str(py), "-m", "bridge.main"],
-         [str(nssm), "set", "wechat-bridge", "AppDirectory", str(PROJECT_ROOT)],
+         [str(nssm), "set", "wechat-bridge", "AppDirectory", str(DEPLOY_ROOT)],
          [str(nssm), "set", "wechat-bridge", "AppExit", "Default", "Restart"],
          [str(nssm), "set", "wechat-bridge", "AppRestartDelay", "10000"],
          [str(nssm), "start", "wechat-bridge"]],

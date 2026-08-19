@@ -16,8 +16,17 @@ from pathlib import Path
 
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_FILE = PROJECT_ROOT / ".config" / "config.yaml"
+# ---- 部署根 / 资源根（打包形态适配）----
+# PyInstaller onefile 打包后：__file__ 在临时解包目录（_MEIPASS），
+# 用户数据（.config/ 等）必须落在可执行文件所在目录，否则重启即丢；
+# 只读资源（static/templates）从解包目录读取。
+import sys as _sys
+
+_FROZEN = getattr(_sys, "frozen", False)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent          # 源码形态项目根
+DEPLOY_ROOT = (Path(_sys.executable).resolve().parent if _FROZEN else PROJECT_ROOT)  # 用户数据根
+RESOURCE_ROOT = (Path(getattr(_sys, "_MEIPASS", PROJECT_ROOT)) if _FROZEN else PROJECT_ROOT)  # 资源根
+CONFIG_FILE = DEPLOY_ROOT / ".config" / "config.yaml"
 
 # ---- 运行参数（bridge 内置，不可被配置文件覆盖）----
 DEFAULTS_RUNTIME: dict = {
@@ -77,7 +86,7 @@ def resolve_path(p: str | Path) -> Path:
     path = Path(s)
     if path.is_absolute():
         return path.resolve()
-    return (PROJECT_ROOT / path).resolve()
+    return (DEPLOY_ROOT / path).resolve()
 
 
 def _load() -> dict:

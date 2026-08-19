@@ -19,6 +19,8 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from bridge.config import RESOURCE_ROOT
+
 # 项目根入 sys.path（python web/wizard.py 运行时 sys.path[0]=web/）
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -26,7 +28,7 @@ if str(_ROOT) not in sys.path:
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("WEB_PORT", "8650"))
-STATIC = Path(__file__).resolve().parent / "static"
+STATIC = RESOURCE_ROOT / "web" / "static"
 MAX_BODY = 1 * 1024 * 1024
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 

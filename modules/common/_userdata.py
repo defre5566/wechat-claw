@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import json
 
-from bridge.config import PROJECT_ROOT
+from bridge.config import DEPLOY_ROOT
 
-CONFIG_DIR = PROJECT_ROOT / ".config"
+CONFIG_DIR = DEPLOY_ROOT / ".config"
 
 
 def _path(name: str) -> Path:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import yaml
 
-from bridge.config import CONFIG_FILE, DEFAULTS_USER, PROJECT_ROOT
+from bridge.config import CONFIG_FILE, DEFAULTS_USER
 from modules.common import crypto as crypto_mod
 from web import auth
 

@@ -13,6 +13,10 @@ PIP = PROJECT_ROOT / ".venv" / ("Scripts/pip.exe" if __import__("os").name == "n
 
 
 def handle(app, body: dict | None = None) -> dict:
+    if getattr(__import__("sys"), "frozen", False):
+        # 打包形态：Python/依赖已随可执行文件，无需装配
+        app.steps["assemble"] = True
+        return {"ok": True, "skipped": True, "reason": "打包形态无需装配"}
     if app.job_running():
         return {"ok": False, "error": "已有装配/安装任务运行中"}, 409
     commands = [

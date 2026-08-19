@@ -13,9 +13,9 @@ import hmac
 import secrets
 import time
 
-from bridge.config import PROJECT_ROOT
+from bridge.config import DEPLOY_ROOT
 
-PASSWORD_FILE = PROJECT_ROOT / ".config" / "admin.password"
+PASSWORD_FILE = DEPLOY_ROOT / ".config" / "admin.password"
 
 PBKDF2_ITERATIONS = 100_000
 SALT_BYTES = 32

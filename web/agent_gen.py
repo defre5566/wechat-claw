@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bridge.config import PROJECT_ROOT
+from bridge.config import DEPLOY_ROOT, RESOURCE_ROOT
 from modules.common import _userdata
 
-TEMPLATE = Path(__file__).resolve().parent / "templates" / "AGENTS.tmpl"
-OUTPUT = PROJECT_ROOT / "AGENTS.md"
+TEMPLATE = RESOURCE_ROOT / "web" / "templates" / "AGENTS.tmpl"
+OUTPUT = DEPLOY_ROOT / "AGENTS.md"
 
 # 中立默认人设（= 默认产物 AGENTS.md 的字段值，未填字段时使用）
 DEFAULTS: dict = {

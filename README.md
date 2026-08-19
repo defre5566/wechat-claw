@@ -57,10 +57,15 @@ python3 -m venv .venv
 
 守护进程与扫码登录见下方"基础设置"与 [docs/开发文档-03](docs/开发文档-03-操作手册.md)（Linux systemd / macOS launchd / Windows nssm）。
 
-### 方式 B：可执行文件（规划中）
+### 方式 B：可执行文件
 
-下载对应平台可执行文件 → 运行 → **web 初始化向导**完成环境装配（opencode 安装 / 配置生成 / 扫码登录）。
-（本节省略号将在打包产物上线后替换为实际步骤。）
+下载对应平台可执行文件（Release 附件）→ 放到任意目录 → 运行 → **web 初始化向导**完成
+环境装配（opencode 安装 / 配置生成 / 扫码登录 / 拉起服务）。
+
+- Linux/macOS：`./wechat-claw`；Windows：`wechat-claw.exe`
+- 用户数据（`.config/`）落在**可执行文件所在目录**，备份 = 打包该目录
+- opencode 不捆绑：向导引导安装官方版本
+- 构建：`.venv/bin/python scripts/build.py`（PyInstaller，不能交叉编译，各平台各自构建）
 
 ## 基础设置（两种安装方式共用）
 

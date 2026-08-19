@@ -8,15 +8,15 @@ import base64
 import json
 import math
 
-from bridge.config import CONFIG_FILE, DEFAULTS_USER, PROJECT_ROOT
+from bridge.config import CONFIG_FILE, DEFAULTS_USER, DEPLOY_ROOT, RESOURCE_ROOT
 from modules.common import get_city, get_habits, get_location, set_city, set_habits, undo_city, undo_habits
 from modules.registry_index import build_index
 from web import agent_gen, auth
 
-CITIES_PATH = PROJECT_ROOT / "web" / "static" / "cities.json"
+CITIES_PATH = RESOURCE_ROOT / "web" / "static" / "cities.json"
 
-AVATAR_FILE = PROJECT_ROOT / ".config" / "avatar.png"
-AVATAR_PREV = PROJECT_ROOT / ".config" / "avatar.prev.png"
+AVATAR_FILE = DEPLOY_ROOT / ".config" / "avatar.png"
+AVATAR_PREV = DEPLOY_ROOT / ".config" / "avatar.prev.png"
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 _cities_cache: list | None = None
 
@@ -264,7 +264,7 @@ def logs_tail(app, body: dict | None = None) -> dict:
     level = str(body.get("level", "")).strip()
     module = str(body.get("module", "")).strip()
     keyword = str(body.get("keyword", "")).strip()
-    log_file = PROJECT_ROOT / "logs" / "system.log"
+    log_file = DEPLOY_ROOT / "logs" / "system.log"
     lines = []
     if log_file.is_file():
         try:

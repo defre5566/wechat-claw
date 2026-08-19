@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""wechat-claw 打包脚本：PyInstaller 单文件构建（按平台）。
+
+用法:
+    .venv/bin/python scripts/build.py            # 本平台构建
+    .venv/bin/python scripts/build.py --check    # 只检查环境（PyInstaller 是否可装）
+
+产物：dist/wechat-claw（Linux/macOS）或 dist/wechat-claw.exe（Windows）
+说明：PyInstaller 不能交叉编译——Windows/macOS 产物需在对应平台执行本脚本。
+"""
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SPEC = ROOT / "scripts" / "wechat-claw.spec"
+VENV_PY = ROOT / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+
+
+def ensure_pyinstaller() -> None:
+    try:
+        import PyInstaller  # noqa: F401
+    except ImportError:
+        print("[build] 安装 PyInstaller ...")
+        r = subprocess.run([str(VENV_PY), "-m", "pip", "install", "pyinstaller"], cwd=str(ROOT))
+        if r.returncode != 0:
+            sys.exit("[build] PyInstaller 安装失败")
+
+
+def main() -> int:
+    if "--check" in sys.argv:
+        ensure_pyinstaller()
+        print("[build] 环境就绪")
+        return 0
+    ensure_pyinstaller()
+    # vendor SDK 需在环境内（PyInstaller 收集依赖）
+    cmd = [str(VENV_PY), "-m", "PyInstaller", "--noconfirm", "--clean", str(SPEC)]
+    print("[build]", " ".join(cmd))
+    r = subprocess.run(cmd, cwd=str(ROOT))
+    if r.returncode != 0:
+        print("[build] 打包失败")
+        return 1
+    out = ROOT / "dist"
+    print(f"[build] 完成：{out}")
+    for f in sorted(out.iterdir()):
+        print(f"  - {f.name} ({f.stat().st_size / 1024 / 1024:.1f} MB)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
