@@ -319,10 +319,25 @@ def module_get(app, body: dict | None = None) -> dict:
 
 
 def module_update(app, body: dict | None = None) -> dict:
-    """保存模块设置（弹窗保存）：走 register.update_module（G1：不碰 token/enabled）。"""
+    """保存模块设置（弹窗保存）：走 register.update_module（G1：不碰 token/enabled）。
+
+    settings：按 settings_schema 校验清洗（类型/选项/show_when 丢弃/required_when 必填），
+    校验失败返回 400（如 vault 模式 vault_path 空白）。
+    """
     body = body or {}
     name = body.get("name", "")
-    from modules.register import update_module
+    from modules.register import get_module, update_module
+    m = get_module(name)
+    if m is None:
+        return {"ok": False, "error": "模块不存在"}, 404
+    settings = body.get("settings")
+    if settings is not None:
+        from web.schema.module_schema import validate_module_settings
+        ok, clean, errors = validate_module_settings(m.get("settings_schema"), settings)
+        if not ok:
+            return {"ok": False, "error": "；".join(errors)}, 400
+    else:
+        clean = None
     ok = update_module(
         name,
         purpose=body.get("purpose"),
@@ -330,6 +345,7 @@ def module_update(app, body: dict | None = None) -> dict:
         schedule=body.get("schedule"),
         retry=body.get("retry"),
         retry_set="retry" in body,
+        settings=clean,
     )
     if ok:
         return {"ok": True}
@@ -357,3 +373,17 @@ def modules_install(app, body: dict | None = None) -> dict:
     if set_enabled(name, True):
         return {"ok": True}
     return {"ok": False, "error": f"模块 {name} 不存在或安装失败"}, 400
+
+
+def modules_remove(app, body: dict | None = None) -> dict:
+    """删除模块（二次确认后调用）：uninstall，默认保留用户数据。
+
+    body.purge_data=true → 连 modules_data/<name>/ 一起删（不可恢复）。
+    """
+    body = body or {}
+    name = body.get("name", "")
+    keep_data = not bool(body.get("purge_data"))
+    from modules.register import uninstall
+    if uninstall(name, keep_data=keep_data):
+        return {"ok": True, "kept_data": keep_data}
+    return {"ok": False, "error": f"模块 {name} 不存在或卸载失败"}, 400

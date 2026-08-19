@@ -20,6 +20,17 @@ import sys
 from pathlib import Path
 
 MODULES_DIR = Path(__file__).resolve().parent
+# CLI 直接运行（python3 modules/register.py）时 sys.path[0]=modules/，
+# 需把项目根加进 sys.path，否则 `from modules.registry_index import invalidate` 找不到包
+if str(MODULES_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(MODULES_DIR.parent))
+
+DATA_ROOT = MODULES_DIR / "modules_data"  # 模块用户数据根（代码/数据分家）
+
+
+def module_data_dir(name: str) -> Path:
+    """模块用户数据目录 modules/modules_data/<name>/（设置 + 业务数据）。"""
+    return DATA_ROOT / name
 
 
 # ---------- 内部 IO ----------
@@ -34,6 +45,33 @@ def _load_module_json(name: str) -> dict:
         except Exception:
             pass
     return {}
+
+
+def _load_settings_json(name: str) -> dict:
+    """读数据区 settings.json（用户配置值；不存在返回 {}）。"""
+    sf = module_data_dir(name) / "settings.json"
+    if sf.is_file():
+        try:
+            data = json.loads(sf.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    return {}
+
+
+def _save_settings_json(name: str, settings: dict) -> bool:
+    """原子写数据区 settings.json。"""
+    try:
+        dd = module_data_dir(name)
+        dd.mkdir(parents=True, exist_ok=True)
+        sf = dd / "settings.json"
+        tmp = sf.with_name(sf.name + ".tmp")
+        tmp.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(sf)
+        return True
+    except OSError:
+        return False
 
 
 def _save_module_json(name: str, data: dict) -> bool:
@@ -64,6 +102,7 @@ def register_module(
     """
     mod_dir = MODULES_DIR / name
     mod_dir.mkdir(parents=True, exist_ok=True)
+    module_data_dir(name).mkdir(parents=True, exist_ok=True)  # 数据区（设置/业务数据）
 
     token = secrets.token_hex(32)
     token_file = mod_dir / "token"
@@ -100,8 +139,14 @@ def update_module(
     schedule: list | None = None,
     retry=None,
     retry_set: bool = False,
+    settings: dict | None = None,
 ) -> bool:
-    """保留字段式更新 module.json（已存在模块改配置；不碰 token/enabled，G1）。"""
+    """保留字段式更新 module.json（已存在模块改配置；不碰 token/enabled，G1）。
+
+    settings：模块设置（settings_schema 对应的当前值），仅显式传入时更新；
+             值存数据区 modules_data/<name>/settings.json（module.json 只留声明，升级不丢），
+             保存后刷新豁免（settings 中 type=path 字段自动豁免，如 Obsidian vault_path）。
+    """
     if not module_exists(name):
         return False
     data = _load_module_json(name)
@@ -114,6 +159,12 @@ def update_module(
     if retry_set:
         data["retry"] = retry
     ok = _save_module_json(name, data)
+    if settings is not None:
+        ok_s = _save_settings_json(name, settings)
+        ok = ok and ok_s
+        if ok_s:
+            from bridge.permissions import refresh_permissions
+            refresh_permissions()  # 设置驱动豁免（vault_path 自动放行）
     if ok:
         from modules.registry_index import invalidate
         invalidate()  # H2：更新后清索引缓存
@@ -134,11 +185,17 @@ def set_enabled(name: str, enabled: bool) -> bool:
 
 
 def get_module(name: str) -> dict | None:
-    """读单个模块配置（含 enabled；不存在返回 None）。"""
+    """读单个模块配置（含 enabled 与 settings 值；不存在返回 None）。
+
+    settings 值从数据区 settings.json 读（module.json 只留声明）。
+    """
     if not module_exists(name):
         return None
     data = _load_module_json(name)
     data["enabled"] = bool(data.get("enabled", False))
+    sv = _load_settings_json(name)
+    if sv:
+        data["settings"] = sv
     return data
 
 
@@ -163,13 +220,21 @@ def list_modules() -> list[dict]:
     return items
 
 
-def uninstall(name: str) -> bool:
-    """卸载模块：删除整个模块目录（文件 + token + module.json；不可恢复）。"""
+def uninstall(name: str, keep_data: bool = True) -> bool:
+    """卸载模块：删除模块代码目录（文件 + token + module.json）。
+
+    keep_data=True（默认）：保留 modules_data/<name>/（用户数据，重装可沿用）；
+    keep_data=False：连数据目录一起删（不可恢复）。
+    """
     mod_dir = MODULES_DIR / name
     if not mod_dir.is_dir():
         return False
     try:
         shutil.rmtree(mod_dir)
+        if not keep_data:
+            dd = module_data_dir(name)
+            if dd.is_dir():
+                shutil.rmtree(dd)
         # G5：同步清调度记录本上该模块分区（cron 字符串键永不 prune，卸载必须主动清，
         # 否则同名重装会复用旧 done_key 跳过当日）
         from bridge.state import load_sched_state, save_sched_state
@@ -177,6 +242,8 @@ def uninstall(name: str) -> bool:
         if name in state:
             del state[name]
             save_sched_state(state)
+        from bridge.permissions import refresh_permissions
+        refresh_permissions()  # 卸载后撤销该模块豁免
         from modules.registry_index import invalidate
         invalidate()
         return True
@@ -230,11 +297,26 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if argv[0] == "--uninstall" and len(argv) >= 2:
-        if uninstall(argv[1]):
-            print(f"[register] {argv[1]} 已卸载（文件已删除）")
+        keep_data = "--purge-data" not in argv
+        if uninstall(argv[1], keep_data=keep_data):
+            if keep_data:
+                print(f"[register] {argv[1]} 已卸载（用户数据保留在 modules_data/{argv[1]}/，重装可沿用）")
+            else:
+                print(f"[register] {argv[1]} 已卸载（含用户数据，已彻底删除）")
             return 0
         print(f"[register] 卸载失败: {argv[1]}")
         return 1
+
+    if argv[0] == "--permissions":
+        from bridge.permissions import collect_permissions, apply_permissions
+        perms = collect_permissions()
+        apply_permissions(perms)
+        for op in ("edit", "write"):
+            print(f"[register] {op}:")
+            for p in sorted(perms.get(op, {})):
+                print(f"    {p}: allow")
+        print("[register] 已写 .config/module-permissions.json（合并进 opencode.jsonc 的 permission.edit/write 生效）")
+        return 0
 
     if argv[0] == "--reissue-token" and len(argv) >= 2:
         return 0 if reissue_token(argv[1]) else 1

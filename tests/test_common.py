@@ -1,20 +1,18 @@
-"""common 纯函数最小回归集（URA 第三轮 #5 补建）。
+"""common 纯函数最小回归集。
 
-覆盖：调度规则判定器（cron_match / every_interval / _rand_offset）、
-任务解析（parse_task_line / trigger_time）、防重 IO（_keep_key）、
-N2 回归（sort_due_key 混合 time/date 任务不抛 TypeError）。
+覆盖：调度规则判定器（cron_match / every_interval / _rand_offset）、防重 IO（_keep_key / _keep_ts_key / prune_state_file）。
+注：vault 任务解析（parse_task_line / scan_md_tasks / sort_due_key）随 task.py 归模块，测试在模块源 tests/。
 """
 from __future__ import annotations
 
 import sys
-from datetime import date, datetime, time
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from modules.common.io import _keep_key, _keep_ts_key, prune_state_file
-from modules.common.task import ParsedTask, parse_task_line, sort_due_key
 
 
 # ---------- cron_match ----------
@@ -55,52 +53,6 @@ def test_rand_offset_within_bounds():
         assert 5 <= v <= 50
     assert _rand_offset("fixed") == 0
     assert _rand_offset("random-x") == 0
-
-
-# ---------- parse_task_line / trigger_time ----------
-
-def test_parse_task_line_fields():
-    t = parse_task_line("- [ ] 买菜 📅 2026-08-17 ⏰ 09:30 🔔提前15分钟 #todo/生活 🔼")
-    assert t is not None
-    assert t.due == date(2026, 8, 17)
-    assert t.time == time(9, 30)
-    assert t.remind_min == 15
-    assert t.tags == ["生活"]
-    assert t.priority == 3  # 🔼 = 3
-    assert t.trigger_time == time(9, 15)  # ⏰ 减去提前量
-
-
-def test_parse_task_line_no_time():
-    t = parse_task_line("- [ ] 写周报 📅 2026-08-17")
-    assert t is not None
-    assert t.time is None
-    assert t.trigger_time is None
-
-
-def test_parse_task_line_non_task():
-    assert parse_task_line("普通文本行") is None
-    assert parse_task_line("## 标题") is None
-
-
-# ---------- sort_due_key（N2 回归） ----------
-
-def test_sort_due_key_mixed_time_and_date():
-    """混合有/无 ⏰ 的今日任务排序不抛 TypeError，无 ⏰ 排最后。"""
-    with_time = ParsedTask(raw_line="", text="有时刻", due=date(2026, 8, 17), time=time(10, 0))
-    no_time = ParsedTask(raw_line="", text="无时刻", due=date(2026, 8, 17), priority=1)
-    late_time = ParsedTask(raw_line="", text="晚时刻", due=date(2026, 8, 17), time=time(18, 0))
-    items = [no_time, late_time, with_time]
-    ordered = sorted(items, key=sort_due_key)
-    assert ordered[0] is with_time
-    assert ordered[1] is late_time
-    assert ordered[2] is no_time
-
-
-def test_sort_due_key_priority_within_same_time():
-    low = ParsedTask(raw_line="", text="低", due=date(2026, 8, 17), priority=5)
-    high = ParsedTask(raw_line="", text="高", due=date(2026, 8, 17), priority=1)
-    ordered = sorted([low, high], key=sort_due_key)
-    assert ordered[0] is high
 
 
 # ---------- _keep_key ----------

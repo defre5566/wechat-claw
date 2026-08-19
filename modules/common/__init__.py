@@ -15,15 +15,6 @@ from .location import get_city, get_location, set_city, undo_city
 from .habit import get_habits, set_habits, undo_habits
 from .log import log_event
 from .push import load_token, post_push
-from .task import (
-    ParsedTask,
-    parse_milestones,
-    parse_task_line,
-    scan_todo_files,
-    sort_due_key,
-    strip_fields,
-    VAULT_TODO_DIR,
-)
 from .weather import (
     fetch_pollen,
     fetch_weather,

@@ -517,11 +517,45 @@
       <div id="moduleModalBody">加载中…</div>
     </div>
     <div class="modal-foot">
+      <button class="btn btn-secondary" id="moduleReset">恢复默认</button>
       <button class="btn btn-secondary" data-close="moduleModal">取消</button>
       <button class="btn btn-primary" id="moduleSave" data-close="moduleModal">保存</button>
     </div>
   </div>
 </div>
+
+<!-- ============ 删除模块弹窗（二次确认 + 小圆圈：删/不删用户数据） ============ -->
+<div class="modal-overlay" id="moduleDeleteModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="moduleDeleteTitle">删除模块</h3>
+      <button class="modal-close" data-close="moduleDeleteModal">✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-desc" id="moduleDeleteDesc">删除后模块代码与 token 将移除，不可恢复。</p>
+      <div class="setting-row" style="margin-top:12px">
+        <div class="setting-text">
+          <div class="setting-title">同时删除用户数据</div>
+          <div class="setting-hint">勾选 = 连该模块的 modules_data 数据一起删除；不勾 = 保留数据，重装可沿用</div>
+        </div>
+        <label class="radio-dot"><input type="checkbox" id="moduleDeletePurge"><span></span></label>
+      </div>
+      <p class="modal-desc" style="margin-top:10px;color:var(--danger,#e5484d)">⚠️ 勾选后数据不可恢复，请确认。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-secondary" data-close="moduleDeleteModal">取消</button>
+      <button class="btn btn-danger" id="moduleDeleteConfirm">删除</button>
+    </div>
+  </div>
+</div>
+
+<style>
+/* 小圆圈勾选项（radio-dot）：圆形 checkbox，勾选实心 */
+.radio-dot input { position:absolute; opacity:0; width:0; height:0; }
+.radio-dot span { display:inline-block; width:18px; height:18px; border:2px solid var(--muted,#9aa0a6); border-radius:50%; position:relative; cursor:pointer; }
+.radio-dot input:checked + span { border-color:var(--danger,#e5484d); }
+.radio-dot input:checked + span::after { content:""; position:absolute; inset:3px; border-radius:50%; background:var(--danger,#e5484d); }
+</style>
 
 <script src="theme.js"></script>
 <script src="api.js"></script>
@@ -859,7 +893,7 @@
             '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>' +
           '</button>' +
           '<label class="switch"><input type="checkbox" data-module="' + m.name + '"' + (m.enabled ? " checked" : "") + '><span class="slider"></span></label>' +
-          '<button class="btn btn-danger btn-sm module-del" hidden>删除</button>' +
+          '<button class="btn btn-danger btn-sm module-del" data-module="' + m.name + '">删除</button>' +
         '</div>';
       list.appendChild(item);
     });
@@ -874,6 +908,10 @@
     $$('.module-gear').forEach(function (g) {
       g.addEventListener("click", function () { openModuleSettings(g.dataset.module); });
     });
+    /* 模块删除 → 二次确认弹窗（小圆圈选删/不删用户数据） */
+    $$('.module-del').forEach(function (b) {
+      b.addEventListener("click", function () { openModuleDelete(b.dataset.module); });
+    });
   }).catch(function () {});
   }
   loadModules();
@@ -883,6 +921,7 @@
       if (!d.module) { alert("模块不存在"); return; }
       document.getElementById("moduleModalTitle").textContent = name + "-设置";
       document.getElementById("moduleModalBody").innerHTML = renderModuleForm(d.module);
+      applyShowWhen();
       open("moduleModal");
     }).catch(function (e) { alert(e.message); });
   }
@@ -914,12 +953,108 @@
         '<span style="font-size:13px;color:var(--muted)">次（空=不补发）</span>' +
       '</div>' +
       '<div class="modal-section-title" style="margin-top:14px">模块参数</div>' +
-      '<p class="modal-desc" style="margin-bottom:0">模块设计时由模块自声明配置项，此处将自动渲染对应表单。</p>';
+      (m.settings_schema && m.settings_schema.length
+        ? renderSettings(m.settings_schema, m.settings || {})
+        : '<p class="modal-desc" style="margin-bottom:0">该模块暂无自定义设置。</p>');
   }
+
+  /* ---- settings_schema 渲染（模块自声明 → 自动表单） ---- */
+  window._curModuleSchema = null;
+  window._curModuleSettings = null;
+
+  function renderSettings(schema, settings) {
+    window._curModuleSchema = schema;
+    window._curModuleSettings = settings || {};
+    var html = "";
+    schema.forEach(function (sec) {
+      html += '<div class="modal-section-title" style="margin-top:14px">' + esc(sec.section || "") + '</div>';
+      if (sec.desc) html += '<p class="modal-desc" style="margin:4px 0 8px">' + esc(sec.desc) + '</p>';
+      (sec.fields || []).forEach(function (f) { html += renderSettingField(f, window._curModuleSettings); });
+    });
+    return '<div id="settings-root">' + html + '</div>';
+  }
+
+  function renderSettingField(f, settings) {
+    var val = settings[f.key] != null ? settings[f.key] : f.default;
+    var type = f.type || "string";
+    var ctl = "";
+    if (type === "select") {
+      var opts = (f.options || []).map(function (o) {
+        var v = typeof o === "object" ? o.value : o;
+        var l = typeof o === "object" ? (o.label || o.value) : o;
+        return '<option value="' + esc(v) + '"' + (String(val) === String(v) ? " selected" : "") + '>' + esc(l) + '</option>';
+      }).join("");
+      ctl = '<select class="sf-field" data-key="' + esc(f.key) + '" data-type="select">' + opts + '</select>';
+    } else if (type === "boolean") {
+      ctl = '<label class="switch"><input type="checkbox" class="sf-field" data-key="' + esc(f.key) + '" data-type="boolean"' + (val ? " checked" : "") + '><span class="slider"></span></label>';
+    } else if (type === "tags") {
+      ctl = '<input type="text" class="sf-tags" data-key="' + esc(f.key) + '" data-type="tags" value="' + esc((val || []).join(",")) + '" placeholder="逗号分隔，每词一个">';
+    } else if (type === "number") {
+      ctl = '<input type="number" class="sf-field" data-key="' + esc(f.key) + '" data-type="number" value="' + esc(val == null ? "" : val) + '">';
+    } else {
+      ctl = '<input type="text" class="sf-field" data-key="' + esc(f.key) + '" data-type="' + esc(type) + '" value="' + esc(val == null ? "" : val) + '"' + (type === "path" ? ' placeholder="如 ~/vault"' : "") + '>';
+    }
+    var show = f.show_when ? ' data-show-when="' + esc(JSON.stringify(f.show_when)) + '"' : "";
+    return '<div class="form-row sf-row"' + show + '><label>' + esc(f.desc || f.key) + '</label>' + ctl + '</div>';
+  }
+
+  function collectSettings(root) {
+    var s = {};
+    if (!root) return s;
+    root.querySelectorAll(".sf-field, .sf-tags").forEach(function (el) {
+      var key = el.getAttribute("data-key");
+      var type = el.getAttribute("data-type");
+      if (!key) return;
+      if (type === "boolean") s[key] = el.checked;
+      else if (type === "tags") s[key] = el.value.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+      else if (type === "number") s[key] = el.value === "" ? null : parseInt(el.value, 10);
+      else s[key] = el.value;
+    });
+    return s;
+  }
+
+  function applyShowWhen() {
+    var root = document.getElementById("settings-root");
+    if (!root) return;
+    var vals = collectSettings(root);
+    root.querySelectorAll(".sf-row[data-show-when]").forEach(function (row) {
+      var cond = {};
+      try { cond = JSON.parse(row.getAttribute("data-show-when")); } catch (e) {}
+      var show = true;
+      Object.keys(cond).forEach(function (k) { if (vals[k] !== cond[k]) show = false; });
+      row.style.display = show ? "" : "none";
+    });
+  }
+
+  function resetSettings() {
+    var schema = window._curModuleSchema;
+    var root = document.getElementById("settings-root");
+    if (!schema || !root) return;
+    var defaults = {};
+    schema.forEach(function (sec) {
+      (sec.fields || []).forEach(function (f) { defaults[f.key] = f.default; });
+    });
+    root.innerHTML = schema.map(function (sec) {
+      var h = '<div class="modal-section-title" style="margin-top:14px">' + esc(sec.section || "") + '</div>';
+      if (sec.desc) h += '<p class="modal-desc" style="margin:4px 0 8px">' + esc(sec.desc) + '</p>';
+      h += (sec.fields || []).map(function (f) { return renderSettingField(f, defaults); }).join("");
+      return h;
+    }).join("");
+    applyShowWhen();
+  }
+
+  /* 弹窗内容 change 时联动显隐（如 data_source 切换） */
+  document.addEventListener("change", function (e) {
+    if (e.target && e.target.closest && e.target.closest("#settings-root")) applyShowWhen();
+  });
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
+
+  document.getElementById("moduleReset").addEventListener("click", function () {
+    resetSettings();
+  });
 
   document.getElementById("moduleSave").addEventListener("click", function () {
     var name = (document.getElementById("moduleModalTitle").textContent || "").replace("-设置", "");
@@ -940,11 +1075,41 @@
     var iv = parseInt(document.getElementById("mf-retry-iv").value, 10);
     var mx = document.getElementById("mf-retry-max").value;
     body.retry = mx === "" ? null : { interval_seconds: iv || 300, max: parseInt(mx, 10) || 0 };
+    /* settings 收集 + 前端校验（vault 空白拦截，后端 400 双保险） */
+    var root = document.getElementById("settings-root");
+    if (root) {
+      var s = collectSettings(root);
+      if (s.data_source === "vault" && !(s.vault_path || "").trim()) {
+        alert("Obsidian 模式下必须填写 vault 目录");
+        return;
+      }
+      body.settings = s;
+    }
     api.post("/api/admin/module/update", body).then(function () {
       var btn = document.getElementById("moduleSave");
       btn.textContent = "已保存 ✓";
       setTimeout(function () { btn.textContent = "保存"; }, 1500);
       loadModules();  // 刷新列表（用途可能变了）
+    }).catch(function (e) { alert(e.message); });
+  });
+
+  /* ---- 删除模块：二次确认弹窗（小圆圈：删/不删用户数据，默认不勾） ---- */
+  var _delModule = null;
+  function openModuleDelete(name) {
+    _delModule = name;
+    document.getElementById("moduleDeleteTitle").textContent = "删除模块 · " + name;
+    document.getElementById("moduleDeleteDesc").textContent =
+      "删除后模块代码与 token 将移除，不可恢复。用户数据默认保留在 modules_data/" + name + "/，重装可沿用。";
+    document.getElementById("moduleDeletePurge").checked = false;  // 默认不勾（不删数据）
+    open("moduleDeleteModal");
+  }
+  document.getElementById("moduleDeleteConfirm").addEventListener("click", function () {
+    if (!_delModule) return;
+    var purge = document.getElementById("moduleDeletePurge").checked;
+    api.post("/api/admin/modules/remove", { name: _delModule, purge_data: purge }).then(function () {
+      close("moduleDeleteModal");
+      _delModule = null;
+      loadModules();
     }).catch(function (e) { alert(e.message); });
   });
 

@@ -32,3 +32,10 @@ PLAN.md
 
 # WorkBuddy 工作区数据（不进仓库）
 .workbuddy/
+
+# 模块用户数据（modules_data/ 目录结构随主体同步，内容不进库；.gitkeep 保留目录）
+modules/modules_data/*
+!modules/modules_data/.gitkeep
+
+# 模块源工作区（独立仓库 wechat-claw_modules_official，避免嵌套仓库）
+wechat-claw_modules_official/
