@@ -29,3 +29,6 @@ modules/common/shared/*.json
 
 # 会话接续文档（分发改造用，不进分发产物）
 PLAN.md
+
+# WorkBuddy 工作区数据（不进仓库）
+.workbuddy/
