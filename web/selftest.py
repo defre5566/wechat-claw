@@ -17,7 +17,9 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PY = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+# 优先项目 .venv（本地惯例）；CI/无 .venv 时用当前解释器（sys.executable）
+_venv_py = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+PY = _venv_py if _venv_py.exists() else Path(sys.executable)
 
 
 def _req(port: int, method: str, path: str, body: dict | None = None,

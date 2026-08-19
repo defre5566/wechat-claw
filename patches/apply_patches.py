@@ -14,6 +14,12 @@ from __future__ import annotations
 import pathlib
 import py_compile
 import sys
+
+# Windows CI 控制台默认 GBK，输出中文/emoji 会 UnicodeEncodeError → 强制 UTF-8
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+import sys
 import sysconfig
 
 VENDOR = pathlib.Path(__file__).resolve().parent.parent / "vendor" / "wechat_agent_sdk"
