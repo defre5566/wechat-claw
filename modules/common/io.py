@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -27,19 +28,36 @@ def load_sent_json(path: Path) -> dict:
 
 
 def save_sent_json(path: Path, data: dict) -> bool:
-    """写防重/状态文件；成功返回 True。失败仅告警（调用方可视情况感知）。"""
+    """写防重/状态文件（A1：tmp + os.replace 原子写，防半写损坏）。成功返回 True。失败仅告警。"""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, ensure_ascii=False))
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
         return True
     except Exception as e:
         print(f"[io] 写文件失败 {path}: {e}", file=sys.stderr)
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
         return False
 
 
-def shared_load(name: str) -> dict:
-    """读共享数据（modules/common/shared/<name>.json）。不存在返回 {}。"""
-    return load_sent_json(SHARED_DIR / f"{name}.json")
+def shared_load(name: str, max_age: float | None = None) -> dict:
+    """读共享数据（modules/common/shared/<name>.json）。不存在返回 {}。
+
+    max_age（秒，可选）：显式传入时校验 ts——数据过期（ts 距今 > max_age）返回 {}
+    （铁律 4：缓存带 TTL；默认不过期向后兼容，消费方自管新鲜度）。
+    """
+    data = load_sent_json(SHARED_DIR / f"{name}.json")
+    if max_age is not None and isinstance(data.get("ts"), (int, float)):
+        try:
+            if time.time() - float(data["ts"]) > max_age:
+                return {}
+        except (TypeError, ValueError):
+            pass
+    return data
 
 
 def shared_save(name: str, data: dict) -> bool:

@@ -9,6 +9,7 @@
   python3 modules/register.py <name> [--purpose 用途] [--spec 规范] \
       [--schedule-json 'json'] [--retry-json 'json|null']
   python3 modules/register.py --enable <name> | --disable <name> | --list | --uninstall <name>
+  python3 modules/register.py --reissue-token <name>   # 仅 token 缺失时补发（H8）
 """
 from __future__ import annotations
 
@@ -57,7 +58,10 @@ def register_module(
     schedule: list | None = None,
     retry=None,
 ) -> dict:
-    """注册模块：建目录 + 重置 token（0600）+ 写 module.json（enabled 默认 false）。"""
+    """注册新模块：建目录 + 生成 token（0600）+ 写 module.json（enabled 默认 false）。
+
+    仅用于"新注册"（模块不存在）；已存在模块改配置走 update_module（不换 token，G1）。
+    """
     mod_dir = MODULES_DIR / name
     mod_dir.mkdir(parents=True, exist_ok=True)
 
@@ -83,6 +87,9 @@ def register_module(
     data.setdefault("schedule", [])
     data.setdefault("retry", None)
     ok = _save_module_json(name, data)
+    if ok:
+        from modules.registry_index import invalidate
+        invalidate()  # H2：注册后清索引缓存，下个 build_index 立即生效
     return {"ok": ok, "name": name, "enabled": False, "token_file": str(token_file)}
 
 
@@ -94,7 +101,7 @@ def update_module(
     retry=None,
     retry_set: bool = False,
 ) -> bool:
-    """保留字段式更新 module.json。"""
+    """保留字段式更新 module.json（已存在模块改配置；不碰 token/enabled，G1）。"""
     if not module_exists(name):
         return False
     data = _load_module_json(name)
@@ -106,7 +113,11 @@ def update_module(
         data["schedule"] = schedule
     if retry_set:
         data["retry"] = retry
-    return _save_module_json(name, data)
+    ok = _save_module_json(name, data)
+    if ok:
+        from modules.registry_index import invalidate
+        invalidate()  # H2：更新后清索引缓存
+    return ok
 
 
 def set_enabled(name: str, enabled: bool) -> bool:
@@ -159,11 +170,41 @@ def uninstall(name: str) -> bool:
         return False
     try:
         shutil.rmtree(mod_dir)
+        # G5：同步清调度记录本上该模块分区（cron 字符串键永不 prune，卸载必须主动清，
+        # 否则同名重装会复用旧 done_key 跳过当日）
+        from bridge.state import load_sched_state, save_sched_state
+        state = load_sched_state()
+        if name in state:
+            del state[name]
+            save_sched_state(state)
         from modules.registry_index import invalidate
         invalidate()
         return True
     except OSError:
         return False
+
+
+def reissue_token(name: str) -> bool:
+    """补发模块 token（H8）：仅当 token 文件缺失时生成新 token；存在则拒绝。
+
+    守住 G1"模块存在期间不轮换 token"——只有"卡丢了"才补一张。
+    """
+    if not module_exists(name):
+        print(f"[register] 模块不存在: {name}")
+        return False
+    token_file = MODULES_DIR / name / "token"
+    if token_file.exists():
+        print(f"[register] {name} 的 token 已存在，不轮换（仅 token 缺失时才补发）")
+        return False
+    import os
+    token = secrets.token_hex(32)
+    fd = os.open(str(token_file), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(token)
+    from modules.registry_index import invalidate
+    invalidate()
+    print(f"[register] {name} 已补发 token（0600）")
+    return True
 
 
 # ---------- CLI ----------
@@ -195,7 +236,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[register] 卸载失败: {argv[1]}")
         return 1
 
-    # 注册/更新（兼容原 CLI）
+    if argv[0] == "--reissue-token" and len(argv) >= 2:
+        return 0 if reissue_token(argv[1]) else 1
+
+    # 注册/更新（G1 分流：已存在模块 → update_module 不换 token；新模块 → register_module 发卡）
     name = argv[0]
     opts: dict[str, str] = {}
     i = 1
@@ -205,6 +249,22 @@ def main(argv: list[str] | None = None) -> int:
             i += 2
         else:
             i += 1
+
+    if module_exists(name):
+        ok = update_module(
+            name,
+            purpose=opts.get("purpose"),
+            spec=opts.get("spec"),
+            schedule=json.loads(opts["schedule-json"]) if "schedule-json" in opts else None,
+            retry=json.loads(opts["retry-json"]) if "retry-json" in opts else None,
+            retry_set="retry-json" in opts,
+        )
+        if not ok:
+            print(f"[register] 更新失败: {name}")
+            return 1
+        print(f"[register] {name} 已更新（token 不变，enabled 保持原状）")
+        return 0
+
     result = register_module(
         name,
         purpose=opts.get("purpose", ""),
@@ -215,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     if not result["ok"]:
         print(f"[register] 注册失败: {name}")
         return 1
-    print(f"[register] {name}: token -> {result['token_file']} (0600 已重置)")
+    print(f"[register] {name}: token -> {result['token_file']} (0600 已生成)")
     print(f"[register] enabled=false（默认关闭，--enable 开启后才会被调度）")
     return 0
 

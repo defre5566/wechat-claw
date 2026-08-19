@@ -10,10 +10,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import time
 from pathlib import Path
 
 MODULES_DIR = Path(__file__).resolve().parent
+
+log = logging.getLogger("wechat-bridge")  # 与 bridge 同 logger（common/log.py 配置）
 
 _CACHE_TTL = 2.0
 _cache: dict = {"ts": 0.0, "index": {}}
@@ -35,9 +38,11 @@ def _token_hash(name: str) -> str | None:
 
 
 def build_index() -> dict:
-    """返回 {模块名: {name, purpose, spec, schedule, retry, args, token_hash, enabled}}。
+    """返回 {模块名: {name, purpose, spec, schedule, retry, token_hash, enabled}}。
 
-    仅含 enabled=true 的模块（register.py 管理启停；缺失或 false = 关闭，不进 index）。
+    - 仅含 enabled=true 的模块（register.py 管理启停；缺失或 false = 关闭，不进 index）
+    - args 内嵌于各 schedule 规则，无顶层 args（H6：every/window/cron 三态统一传规则 args）
+    - H8：token 文件缺失的模块不进 index（异常状态，避免无限 401 补发循环）
     """
     now = time.monotonic()
     if now - _cache["ts"] < _CACHE_TTL:
@@ -56,13 +61,18 @@ def build_index() -> dict:
         name = data.get("name") or mod_dir.name
         if not data.get("enabled", False):
             continue  # 关闭的模块不调度、不认 token
+        th = _token_hash(name)
+        if th is None:
+            log.error(f"[index] 模块 {name} token 文件缺失（未加入索引，无法调度/推送；可用 register.py --reissue-token {name} 补发）")
+            continue  # H8：token 缺失不进 index
         index[name] = {
             "name": name,
             "purpose": data.get("purpose", ""),
             "spec": data.get("spec", "规范.md"),
             "schedule": data.get("schedule", []),
             "retry": data.get("retry"),
-            "token_hash": _token_hash(name),
+            "inbound": data.get("inbound"),  # B：入站订阅声明（intents/scope/priority）
+            "token_hash": th,
             "enabled": True,
         }
     _cache["ts"] = time.monotonic()

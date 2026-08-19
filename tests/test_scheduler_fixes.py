@@ -11,7 +11,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from bridge.scheduler import cron_match, every_interval, _rand_offset
+from bridge.scheduler import (
+    cron_match,
+    every_interval,
+    _rand_offset,
+    _window_hours,
+    _parse_once,
+    _next_once_retry,
+)
 
 
 # ---------- B2：cron 周段标准语义（周日=0）----------
@@ -99,3 +106,77 @@ def test_cron_in_retry_window_blocks():
     run = _cron_should_run(mod_state["m"], "r", max_retry=3, retry_iv=300, now_ts=1e9 + 100)
     assert run is False
     assert "r_failed" in mod_state["m"]  # 未超次，记录保留
+
+
+# ---------- cron 增强：列表 / 区间 / 步进 ----------
+
+def test_cron_list_field():
+    """分钟列表 15,45：8:15 与 8:45 都命中，8:30 不命中。"""
+    t = datetime(2026, 8, 18, 8, 15)
+    assert cron_match("15,45 8 * * *", t)
+    assert cron_match("15,45 8 * * *", t.replace(minute=45))
+    assert not cron_match("15,45 8 * * *", t.replace(minute=30))
+
+
+def test_cron_range_field():
+    """小时区间 8-21：8 点和 21 点命中，7 点和 22 点不命中。"""
+    t = datetime(2026, 8, 18, 8, 0)
+    assert cron_match("0 8-21 * * *", t)
+    assert cron_match("0 8-21 * * *", t.replace(hour=21))
+    assert not cron_match("0 8-21 * * *", t.replace(hour=7))
+    assert not cron_match("0 8-21 * * *", t.replace(hour=22))
+
+
+def test_cron_step_field():
+    """步进 */30（分钟）：0/30 分命中，15 分不命中。"""
+    t = datetime(2026, 8, 18, 8, 0)
+    assert cron_match("*/30 8 * * *", t)
+    assert cron_match("*/30 8 * * *", t.replace(minute=30))
+    assert not cron_match("*/30 8 * * *", t.replace(minute=15))
+
+
+def test_cron_dow_range_weekdays():
+    """周段区间 1-5（周一至周五）：周二命中、周日不命中。"""
+    tue = datetime(2026, 8, 18, 8, 0)   # 周二
+    sun = datetime(2026, 8, 16, 8, 0)   # 周日
+    assert cron_match("0 8 * * 1-5", tue)
+    assert not cron_match("0 8 * * 1-5", sun)
+
+
+def test_cron_invalid_still_safe():
+    """非法表达式（含暂不支持的 a-b/n）→ False，绝不抛异常。"""
+    t = datetime(2026, 8, 18, 8, 0)
+    assert cron_match("x 8 * * *", t) is False
+    assert cron_match("1-59/2 8 * * *", t) is False  # a-b/n 暂不支持（定稿）
+    assert cron_match("15,45 8 * * *", t.replace(minute=15)) is True  # 正常表达式不受影响
+
+
+# ---------- H1：window hours 防御解析 ----------
+
+def test_window_hours_valid():
+    assert _window_hours("8-21") == (8, 21)
+    assert _window_hours("0-23") == (0, 23)
+
+
+def test_window_hours_invalid_safe():
+    """非法/倒序/越界 → None（绝不抛异常，防连坐全调度）。"""
+    assert _window_hours("8") is None       # 只写一个数字
+    assert _window_hours("8-x") is None     # 非数字
+    assert _window_hours("21-8") is None    # 倒序
+    assert _window_hours("25-30") is None   # 越界
+    assert _window_hours("") is None
+
+
+# ---------- once：时刻解析与超次重试 ----------
+
+def test_parse_once_valid_and_invalid():
+    assert _parse_once("2026-09-01T09:00") is not None
+    assert _parse_once("not-a-date") is None
+
+
+def test_next_once_retry_skips_to_future_once_time():
+    """超次后下次尝试 = 最近一个未来的 once_at 时刻。"""
+    once_at = datetime(2026, 9, 1, 9, 0)
+    now = datetime(2026, 9, 3, 14, 0)   # 已过了两天
+    nxt = _next_once_retry(once_at, now)
+    assert nxt == datetime(2026, 9, 4, 9, 0)  # 9月4日 09:00（最近的未来 once 时刻）

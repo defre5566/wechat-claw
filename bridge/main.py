@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -32,7 +33,7 @@ from wechat_agent_sdk.types import ChatRequest
 from .config import get as get_cfg
 
 from .push_server import PUSH_AGENT_TYPES, PUSH_DIRECT_TYPES, PUSH_HOST, PUSH_PORT, start_push_server
-from .scheduler import run_module, scheduler
+from .scheduler import MODULES_DIR, RUN_TIMEOUT, run_module, scheduler
 from .session import ConfirmAcpAgent, PermissionGate, SessionManager
 from .paths import classify
 
@@ -220,6 +221,9 @@ class BridgeCore:
         if self.sessions.check(conversation_id) == "expired":
             await self.send_text(conversation_id, "（上一轮会话已超时归档，本消息开启新会话）")
         try:
+            # B：入站路由——模块订阅优先（接管则不再进 agent）
+            if await self._route_inbound(conversation_id, text):
+                return
             await self._transport.send_typing(conversation_id, start=True, context_token=self._last_token.get(conversation_id, ""))
             reply = await self._agent.chat(ChatRequest(conversation_id=conversation_id, text=text))
             out = reply.text if hasattr(reply, "text") else str(reply)
@@ -230,6 +234,73 @@ class BridgeCore:
             log.error(f"处理失败: {e}")
             await self._transport.send_typing(conversation_id, start=False, context_token=self._last_token.get(conversation_id, ""))
             await self.send_text(conversation_id, f"处理出错：{e}")
+
+    async def _route_inbound(self, conversation_id: str, text: str) -> bool:
+        """B：入站路由——enabled 模块的 inbound 订阅按 priority 顺序匹配意图。
+
+        命中 → spawn 模块（--inbound <text> --conversation <id>）：
+          rc=0 + stdout → 模块自答（stdout 即回话）→ True（消息被接管）
+          rc=3          → 模块主动转 agent → False
+          rc 其他        → 记日志降级 agent → False（不阻塞用户）
+        多模块竞争：priority 高者先试，接管即止（定稿语义）。
+        """
+        from modules.registry_index import build_index
+        index = build_index()
+        candidates: list[tuple[int, str, str]] = []
+        for name, cfg in index.items():
+            ib = cfg.get("inbound") or {}
+            intents = ib.get("intents") or []
+            if not intents:
+                continue
+            for intent in intents:
+                if intent and intent in text:
+                    candidates.append((int(ib.get("priority", 0)), name, intent))
+                    break
+        if not candidates:
+            return False
+        candidates.sort(key=lambda x: -x[0])  # 高 priority 先试
+        for _pri, name, intent in candidates:
+            rc, out = await self._run_inbound(name, conversation_id, text)
+            if rc == 0:
+                if out:
+                    await self.send_text(conversation_id, out)
+                log.info(f"[inbound] {name} 接管消息（intent={intent!r}）")
+                return True
+            if rc == 3:
+                log.info(f"[inbound] {name} 转 agent（intent={intent!r}）")
+                return False
+            log.warning(f"[inbound] {name} 处理失败 rc={rc}（降级 agent）")
+            return False  # 失败即降级，不连续试多模块
+        return False
+
+    async def _run_inbound(self, name: str, conversation_id: str, text: str) -> tuple[int, str]:
+        """spawn 模块 inbound 模式；返回 (rc, stdout_text)。
+
+        返回码约定（定稿 B）：0=自答（stdout 即回话文本）/ 3=转 agent / 1=业务失败 / 2=引擎级异常。
+        """
+        script = MODULES_DIR / name / f"{name}_worker.py"
+        if not script.is_file():
+            log.error(f"[inbound] 模块脚本不存在: {script}")
+            return 2, ""
+        cmd = [sys.executable, str(script), "--inbound", text, "--conversation", conversation_id]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            try:
+                out, err = await asyncio.wait_for(proc.communicate(), timeout=RUN_TIMEOUT)
+            except asyncio.TimeoutError:
+                proc.kill()
+                log.error(f"[inbound] {name} 超时 {RUN_TIMEOUT}s，已终止")
+                return 2, ""
+            rc = proc.returncode or 0
+            out_text = out.decode(errors="replace").strip() if out else ""
+            if rc != 0 and err:
+                log.error(f"[inbound] {name} rc={rc}: {err.decode(errors='replace')[-500:]}")
+            return rc, out_text
+        except Exception as e:
+            log.error(f"[inbound] {name} spawn 失败: {e}")
+            return 2, ""
 
     async def run(self) -> None:
         from .state import load_or_create_token, load_retry_queue

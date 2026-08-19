@@ -162,6 +162,8 @@ ROUTES = {
     ("GET", "/api/admin/modules"): _h("admin", "modules_list", True),
     ("POST", "/api/admin/modules/toggle"): _h("admin", "modules_toggle", True),
     ("POST", "/api/admin/modules/install"): _h("admin", "modules_install", True),
+    ("POST", "/api/admin/module/get"): _h("admin", "module_get", True),
+    ("POST", "/api/admin/module/update"): _h("admin", "module_update", True),
 }
 
 

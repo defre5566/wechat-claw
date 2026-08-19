@@ -90,8 +90,7 @@ EOF
 
 | 文件 | 作用 |
 |---|---|
-| [AGENTS.md](AGENTS.md) | 对话 agent 系统提示**模板**（身份/守则/安全红线占位符） |
-| [AGENTS-example.md](AGENTS-example.md) | 填好默认中立人设的**参考实例**，照此客制化自己的 AGENTS.md |
+| [AGENTS.md](AGENTS.md) | 对话 agent 系统提示（管理后台"助理人设"经 web/templates/AGENTS.tmpl + agent_gen.py 生成；仓库内为默认模板） |
 | [opencode.jsonc.example](opencode.jsonc.example) | 对话 agent **权限配置**（deny 五项 token/密钥），复制为项目根 `opencode.jsonc` 生效 |
 
 ### 4. 守护进程
@@ -126,7 +125,7 @@ EOF
 ## 目录结构
 
 ```
-├── AGENTS.md / AGENTS-example.md   # 对话 agent 系统提示模板 / 实例
+├── AGENTS.md                        # 对话 agent 系统提示（管理后台生成）
 ├── opencode.jsonc.example          # 对话 agent 权限配置示例
 ├── config.yaml.example             # 用户配置示例（运行参数 bridge 内置）
 ├── bridge/                         # 基础设施：main / push_server / scheduler / session / state

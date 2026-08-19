@@ -43,12 +43,19 @@ def _load_json_file(path: Path) -> dict:
 
 
 def _save_json_file(path: Path, data: dict) -> bool:
+    """原子写 JSON（tmp + os.replace，防写一半崩溃损坏文件，H3）。"""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
         return True
     except Exception as e:
         print(f"[state] 写文件失败 {path}: {e}", file=sys.stderr)
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
         return False
 
 
@@ -148,11 +155,9 @@ def load_sched_state() -> dict:
 
 
 def save_sched_state(state: dict) -> None:
-    try:
-        SDK_DIR.mkdir(parents=True, exist_ok=True)
-        SCHED_STATE_FILE.write_text(json.dumps(state))
-    except Exception as e:
-        print(f"[sched] 保存状态失败: {e}", file=sys.stderr)
+    """落盘调度状态（H3：走 _save_json_file 原子写，防半写损坏）。"""
+    if not _save_json_file(SCHED_STATE_FILE, state):
+        print(f"[sched] 保存状态失败", file=sys.stderr)
 
 
 def target_conversation_ids() -> list[str]:

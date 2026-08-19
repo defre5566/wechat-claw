@@ -301,17 +301,39 @@ def logs_tail(app, body: dict | None = None) -> dict:
 # ---------- 模块（经 register.py / build_index） ----------
 
 def modules_list(app, body: dict | None = None) -> dict:
-    index = build_index()
-    items = []
-    for name, cfg in sorted(index.items()):
-        items.append({
-            "name": name,
-            "purpose": cfg.get("purpose", ""),
-            "schedule": cfg.get("schedule", []),
-            "retry": cfg.get("retry"),
-            "enabled": cfg.get("enabled", False),
-        })
-    return {"ok": True, "modules": items}
+    """全量模块列表（含禁用）：register.list_modules（G4：花名册替代排班表）。
+
+    修复前用 build_index（只含 enabled）→ 关掉的模块从后台消失无法复启。
+    """
+    from modules.register import list_modules
+    return {"ok": True, "modules": list_modules()}
+
+
+def module_get(app, body: dict | None = None) -> dict:
+    """读单个模块完整配置（弹窗渲染用）：enabled/schedule/retry/inbound。"""
+    from modules.register import get_module
+    m = get_module((body or {}).get("name", ""))
+    if m is None:
+        return {"ok": False, "error": "模块不存在"}, 404
+    return {"ok": True, "module": m}
+
+
+def module_update(app, body: dict | None = None) -> dict:
+    """保存模块设置（弹窗保存）：走 register.update_module（G1：不碰 token/enabled）。"""
+    body = body or {}
+    name = body.get("name", "")
+    from modules.register import update_module
+    ok = update_module(
+        name,
+        purpose=body.get("purpose"),
+        spec=body.get("spec"),
+        schedule=body.get("schedule"),
+        retry=body.get("retry"),
+        retry_set="retry" in body,
+    )
+    if ok:
+        return {"ok": True}
+    return {"ok": False, "error": f"模块 {name} 不存在或保存失败"}, 400
 
 
 def modules_toggle(app, body: dict | None = None) -> dict:
