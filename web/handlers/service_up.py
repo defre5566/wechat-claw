@@ -45,6 +45,13 @@ def _write_and_run(path: Path, content: str, commands: list[list[str]]) -> list[
     return steps
 
 
+def _bridge_command() -> str:
+    """bridge 启动命令：打包形态 = 可执行文件自身；源码形态 = venv python -m bridge.main。"""
+    if getattr(__import__("sys"), "frozen", False):
+        return __import__("sys").executable
+    return f"{DEPLOY_ROOT / '.venv' / 'bin' / 'python'} -m bridge.main"
+
+
 def _systemd() -> list[dict]:
     unit = Path.home() / ".config" / "systemd" / "user" / "wechat-bridge.service"
     content = f"""[Unit]
@@ -55,7 +62,7 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
-ExecStart={PROJECT_ROOT / '.venv' / 'bin' / 'python'} -m bridge.main
+ExecStart={_bridge_command()}
 WorkingDirectory={DEPLOY_ROOT}
 Restart=on-failure
 RestartSec=10
@@ -79,9 +86,7 @@ def _launchd() -> list[dict]:
     <string>wechat-bridge</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{PROJECT_ROOT / '.venv' / 'bin' / 'python'}</string>
-        <string>-m</string>
-        <string>bridge.main</string>
+        <string>{_bridge_command()}</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{DEPLOY_ROOT}</string>
@@ -109,7 +114,8 @@ def _nssm() -> list[dict]:
         return [{"cmd": "Windows 平台才支持 nssm", "ok": False}]
     arch = "win64" if sys.maxsize > 2 ** 32 else "win32"
     nssm = RESOURCE_ROOT / "vendor" / "nssm" / f"{arch}.exe"
-    py = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+    py = __import__("sys").executable if getattr(__import__("sys"), "frozen", False) \
+        else str(DEPLOY_ROOT / ".venv" / "Scripts" / "python.exe")
     if not nssm.is_file():
         return [{"cmd": f"nssm 缺失: {nssm}", "ok": False}]
     return _write_and_run(

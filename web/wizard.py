@@ -19,12 +19,12 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from bridge.config import RESOURCE_ROOT
-
 # 项目根入 sys.path（python web/wizard.py 运行时 sys.path[0]=web/）
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+from bridge.config import RESOURCE_ROOT
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("WEB_PORT", "8650"))
