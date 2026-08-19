@@ -68,7 +68,7 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
         </span>
         <span class="name">opencode</span>
-        <span class="detail">未安装（下一步可安装）</span>
+        <span class="detail">未安装（下一步有安装指引）</span>
       </div>
 
       <div class="check-item">
@@ -97,23 +97,20 @@
       <h2>安装 opencode</h2>
       <div class="sub">对话 agent 运行时（opencode ACP 子进程）</div>
 
-      <div class="check-item">
-        <span class="icon status-warn">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
-        </span>
-        <span class="name">未检测到 opencode</span>
-        <span class="detail">将使用官方安装脚本安装（Linux/macOS：curl；Windows：PowerShell）</span>
+      <div class="check-item" id="opencodeStatus">
+        <span class="name">检测中…</span>
       </div>
 
-      <div style="margin:16px 0 10px;font-size:13px;color:var(--muted)">安装日志：</div>
-      <div class="log-console" id="installLog"></div>
+      <div id="opencodeGuide" style="display:none;margin-top:14px">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:8px">未检测到 opencode。请在终端手动执行官方安装命令，完成后点「重新检测」：</div>
+        <pre id="opencodeCmd" style="background:var(--bg);padding:10px 12px;border-radius:6px;font-size:13px;overflow-x:auto;white-space:pre-wrap"></pre>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">
+          安装文档：<a id="opencodeDoc" target="_blank" rel="noopener" style="color:var(--accent)"></a>
+        </div>
+      </div>
 
       <div style="margin-top:14px">
-        <button class="btn btn-primary btn-sm" id="installBtn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-          安装 opencode
-        </button>
-        <span style="font-size:12px;color:var(--muted);margin-left:10px">已安装时可跳过</span>
+        <button class="btn btn-primary btn-sm" id="opencodeBtn">重新检测</button>
       </div>
     </div>
 
@@ -279,31 +276,39 @@
   }
   envBtn.addEventListener("click", runEnv);
 
-  /* ② opencode 安装 */
-  var installBtn = document.getElementById("installBtn");
-  var installLog = document.getElementById("installLog");
-  installBtn.addEventListener("click", function () {
-    installBtn.disabled = true;
-    installBtn.innerHTML = "安装中…";
+  /* ② opencode 检测+引导（不在向导内执行远程安装脚本，S5） */
+  var opencodeBtn = document.getElementById("opencodeBtn");
+  var opencodeStatus = document.getElementById("opencodeStatus");
+  var opencodeGuide = document.getElementById("opencodeGuide");
+  var opencodeCmd = document.getElementById("opencodeCmd");
+  var opencodeDoc = document.getElementById("opencodeDoc");
+  function opencodeDetect() {
+    opencodeBtn.disabled = true;
+    opencodeBtn.textContent = "检测中…";
     api.post("/api/opencode/install").then(function (data) {
-      if (data.already) {
-        logAppend(installLog, ["opencode 已安装：" + data.version]);
+      opencodeBtn.disabled = false;
+      opencodeBtn.textContent = "重新检测";
+      if (data.ok && data.already) {
+        opencodeStatus.innerHTML = '<span class="icon status-ok">✓</span><span class="name">opencode 已安装</span><span class="detail">' + (data.version || "") + '</span>';
+        opencodeGuide.style.display = "none";
         setStepDone(1);
-        installBtn.textContent = "已安装";
-        return;
+      } else if (data.missing) {
+        opencodeStatus.innerHTML = '<span class="icon status-warn">!</span><span class="name">未检测到 opencode</span>';
+        opencodeCmd.textContent = data.cmd || "";
+        opencodeDoc.textContent = data.doc || "";
+        opencodeDoc.href = data.doc || "#";
+        opencodeGuide.style.display = "block";
+      } else {
+        alert(data.error || "检测失败");
       }
-      api.poll("/api/opencode/status", function (lines) {
-        logAppend(installLog, lines);
-      }, function (ok) {
-        installBtn.textContent = ok ? "✓ 安装完成" : "安装失败";
-        if (ok) setStepDone(1);
-      }, function (e) { alert(e.message); });
     }).catch(function (e) {
-      installBtn.textContent = "安装 opencode";
-      installBtn.disabled = false;
+      opencodeBtn.disabled = false;
+      opencodeBtn.textContent = "重新检测";
       alert(e.message);
     });
-  });
+  }
+  opencodeBtn.addEventListener("click", opencodeDetect);
+  opencodeDetect();
 
   /* ③ 装配 */
   var assembleBtn = document.getElementById("assembleBtn");
