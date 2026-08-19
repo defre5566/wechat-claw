@@ -163,6 +163,11 @@ ROUTES = {
     ("POST", "/api/admin/modules/toggle"): _h("admin", "modules_toggle", True),
     ("POST", "/api/admin/modules/install"): _h("admin", "modules_install", True),
     ("POST", "/api/admin/modules/remove"): _h("admin", "modules_remove", True),
+    ("GET", "/api/admin/sources"): _h("admin", "sources_list", True),
+    ("POST", "/api/admin/sources"): _h("admin", "sources_list", True),
+    ("POST", "/api/admin/sources/add"): _h("admin", "source_add", True),
+    ("POST", "/api/admin/sources/remove"): _h("admin", "source_remove", True),
+    ("POST", "/api/admin/sources/refresh"): _h("admin", "source_refresh", True),
     ("POST", "/api/admin/module/get"): _h("admin", "module_get", True),
     ("POST", "/api/admin/module/update"): _h("admin", "module_update", True),
 }

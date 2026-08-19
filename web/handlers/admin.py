@@ -363,16 +363,21 @@ def modules_toggle(app, body: dict | None = None) -> dict:
 
 
 def modules_install(app, body: dict | None = None) -> dict:
-    """从模块源安装模块（G 块实现：本地隐藏模块直接启用；GitHub 源下载）。
+    """从模块源安装模块：校验（清单/结构/哈希）→ 复制 → 注册（token+数据目录+enabled:false）。
 
-    demo 阶段：仅支持启用已存在的本地模块（enabled=true）。
+    body: {source_id, name}。
     """
     body = body or {}
+    sid = body.get("source_id", "")
     name = body.get("name", "")
-    from modules.register import set_enabled
-    if set_enabled(name, True):
-        return {"ok": True}
-    return {"ok": False, "error": f"模块 {name} 不存在或安装失败"}, 400
+    if not sid or not name:
+        return {"ok": False, "error": "缺少 source_id 或 name"}, 400
+    from bridge.module_source import load_sources, install_module
+    sources = load_sources()
+    r = install_module(sources, sid, name)
+    if r["ok"]:
+        return {"ok": True, "name": name, "enabled": False}
+    return {"ok": False, "error": r.get("error", "安装失败")}, 400
 
 
 def modules_remove(app, body: dict | None = None) -> dict:
@@ -387,3 +392,80 @@ def modules_remove(app, body: dict | None = None) -> dict:
     if uninstall(name, keep_data=keep_data):
         return {"ok": True, "kept_data": keep_data}
     return {"ok": False, "error": f"模块 {name} 不存在或卸载失败"}, 400
+
+
+# ---------- 模块源（web 安装模块功能） ----------
+
+def sources_list(app, body: dict | None = None) -> dict:
+    """源列表 + 全部模块目录（按源顺序，含 installed 标记）。"""
+    from bridge.module_source import load_sources, list_catalog
+    sources = load_sources()
+    return {"ok": True, "sources": sources, "catalog": list_catalog(sources)}
+
+
+def source_add(app, body: dict | None = None) -> dict:
+    """添加源：github（URL）/ local（路径）→ 拉取列表 → 存入 sources.json。
+
+    body: {type, url, name?}。返回 {ok, source, error?}。
+    """
+    body = body or {}
+    stype = body.get("type", "")
+    url = (body.get("url") or "").strip()
+    if stype not in ("github", "local") or not url:
+        return {"ok": False, "error": "类型或地址无效"}, 400
+
+    from bridge.module_source import (
+        load_sources, save_sources, fetch_source, _find_source,
+    )
+    sources = load_sources()
+    # 同名地址去重（github 按 URL，local 按路径）
+    for s in sources:
+        if s.get("type") == stype and s.get("url") == url:
+            return {"ok": False, "error": f"该源已存在（{s.get('name')}）"}, 400
+
+    src = {
+        "id": f"{stype}_{len(sources)}",
+        "name": (body.get("name") or url.split("/")[-1].replace(".git", "") or stype).strip(),
+        "type": stype,
+        "url": url,
+        "builtin": False,
+        "added_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "fingerprint": "",
+        "modules": [],
+    }
+    res = fetch_source(src)  # 添加源 → 自动拉列表（第 7 条）
+    if not res["ok"]:
+        return {"ok": False, "error": f"拉取失败: {res['error']}"}, 400
+    src["modules"] = res["modules"]
+    src["fingerprint"] = res["fingerprint"]
+    sources.append(src)
+    save_sources(sources)
+    return {"ok": True, "source": src}
+
+
+def source_remove(app, body: dict | None = None) -> dict:
+    """删除源（builtin 官方源不可删）。"""
+    body = body or {}
+    sid = body.get("id", "")
+    from bridge.module_source import load_sources, save_sources, _find_source
+    sources = load_sources()
+    src = _find_source(sources, sid)
+    if src is None:
+        return {"ok": False, "error": f"源不存在: {sid}"}, 404
+    if src.get("builtin"):
+        return {"ok": False, "error": "内置官方源不可删除"}, 400
+    sources.remove(src)
+    save_sources(sources)
+    return {"ok": True}
+
+
+def source_refresh(app, body: dict | None = None) -> dict:
+    """手动刷新源模块列表（指纹对比，有新提交则更新缓存）。"""
+    body = body or {}
+    sid = body.get("id", "")
+    from bridge.module_source import load_sources, refresh_source
+    sources = load_sources()
+    r = refresh_source(sources, sid)
+    if not r["ok"]:
+        return {"ok": False, "error": r["error"]}, 400
+    return {"ok": True, "updated": r["updated"], "modules": r["modules"]}
