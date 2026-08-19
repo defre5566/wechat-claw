@@ -78,8 +78,8 @@ def main() -> int:
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
         try:
-            # 等服务起来
-            for _ in range(50):
+            # 等服务起来（windows 冷启动较慢，放宽到 30s）
+            for _ in range(150):
                 try:
                     st, _ = _req(port, "GET", "/api/state")
                     if st == 200:
@@ -87,6 +87,16 @@ def main() -> int:
                 except Exception:
                     pass
                 time.sleep(0.2)
+            else:
+                # 服务未起来：dump 子进程输出辅助诊断
+                out = b""
+                if proc.stdout:
+                    try:
+                        out = proc.stdout.read(4096)
+                    except Exception:
+                        pass
+                print(f"[selftest] wizard 未在 30s 内就绪; 子进程输出:\n{out.decode(errors='replace')[:2000]}")
+                raise RuntimeError("wizard 服务未就绪")
 
             checks = []
 
