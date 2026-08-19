@@ -8,6 +8,12 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+
+# Windows 控制台默认 cp1252/GBK，中文输出会 UnicodeEncodeError → 强制 UTF-8
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 import shutil
 import subprocess
 import sys
