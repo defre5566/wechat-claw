@@ -10,8 +10,10 @@
   config.yaml.example、AGENTS.md、opencode.jsonc.example、vendor/nssm（Windows）
 - 动态导入模块：web.handlers.* 显式收集
 """
-from PyInstaller.utils.hooks import collect_submodules
+import sys
 from pathlib import Path
+
+from PyInstaller.utils.hooks import collect_submodules
 
 _SPEC_DIR = Path(SPECPATH)  # PyInstaller 内置：spec 文件所在目录
 _ROOT = _SPEC_DIR.parent
@@ -28,6 +30,9 @@ datas = [
     (str(_ROOT / "AGENTS.md"), "."),
     (str(_ROOT / "opencode.jsonc.example"), "."),
 ]
+if sys.platform == "win32":
+    # Windows 服务化依赖 nssm（service_up 从 RESOURCE_ROOT 读取）
+    datas.append((str(_ROOT / "vendor" / "nssm"), "vendor/nssm"))
 
 a = Analysis(
     [str(_ROOT / "web" / "wizard.py")],

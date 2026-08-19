@@ -49,7 +49,8 @@ def _bridge_command() -> str:
     """bridge 启动命令：打包形态 = 可执行文件自身；源码形态 = venv python -m bridge.main。"""
     if getattr(__import__("sys"), "frozen", False):
         return __import__("sys").executable
-    return f"{DEPLOY_ROOT / '.venv' / 'bin' / 'python'} -m bridge.main"
+    py = DEPLOY_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    return f"{py} -m bridge.main"
 
 
 def _systemd() -> list[dict]:
