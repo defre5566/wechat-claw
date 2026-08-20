@@ -19,6 +19,11 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+# Windows 控制台默认 cp1252，中文 print 会 UnicodeEncodeError 导致启动崩溃 → 强制 UTF-8
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # 项目根入 sys.path（python web/wizard.py 运行时 sys.path[0]=web/）
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
