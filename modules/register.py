@@ -74,6 +74,54 @@ def _save_settings_json(name: str, settings: dict) -> bool:
         return False
 
 
+# ---------- schedule_from_settings 联动（设置时间字段 → 调度 cron） ----------
+
+def _time_to_cron(t) -> str | None:
+    """'HH:MM' → cron 'MM HH * * *'；非法返回 None。"""
+    if not isinstance(t, str):
+        return None
+    try:
+        hh, mm = t.strip().split(":")
+        h, m = int(hh), int(mm)
+        if not (0 <= h < 24 and 0 <= m < 60):
+            return None
+        return f"{m} {h} * * *"
+    except Exception:
+        return None
+
+
+def _sync_schedule_from_settings(name: str) -> None:
+    """schedule_from_settings 联动：按设置时间字段生成 cron 写回 module.json schedule。
+
+    module.json 声明：`"schedule_from_settings": [{"phase": "morning", "time_field": "morning_time", "enabled_field": "planner_on"}]`
+    - time_field：设置中的时刻（HH:MM）→ cron
+    - enabled_field：设置中的总开关（false → 该项不生成调度）
+    """
+    data = _load_module_json(name)
+    sfs = data.get("schedule_from_settings")
+    if not isinstance(sfs, list) or not sfs:
+        return
+    settings = _load_settings_json(name)
+    schedule: list[dict] = []
+    for item in sfs:
+        if not isinstance(item, dict):
+            continue
+        phase = str(item.get("phase", ""))
+        tf = str(item.get("time_field", ""))
+        ef = item.get("enabled_field")
+        if ef and settings.get(ef) is False:
+            continue
+        cron = _time_to_cron(settings.get(tf))
+        if not cron:
+            continue
+        entry: dict = {"id": phase or tf, "cron": cron}
+        if phase:
+            entry["args"] = ["--phase", phase]
+        schedule.append(entry)
+    data["schedule"] = schedule
+    _save_module_json(name, data)
+
+
 def _save_module_json(name: str, data: dict) -> bool:
     try:
         mj = MODULES_DIR / name / "module.json"
@@ -163,6 +211,12 @@ def update_module(
         ok_s = _save_settings_json(name, settings)
         ok = ok and ok_s
         if ok_s:
+            _sync_schedule_from_settings(name)  # 时间设置 → 调度 cron 联动
+            from bridge.jobs import sync_module_jobs
+            rj = sync_module_jobs(name)  # agent 型长任务：渲染 + 自动登记/注销（无声明跳过）
+            if not rj.get("ok"):
+                from modules.common.log import log_event
+                log_event("WARN", name, "job_sync_fail", rj.get("error", "job 联动失败"))
             from bridge.permissions import refresh_permissions
             refresh_permissions()  # 设置驱动豁免（vault_path 自动放行）
     if ok:
@@ -179,6 +233,9 @@ def set_enabled(name: str, enabled: bool) -> bool:
     data["enabled"] = bool(enabled)
     ok = _save_module_json(name, data)
     if ok:
+        if not enabled:
+            from bridge.jobs import unregister_jobs
+            unregister_jobs(name)  # 停用 → 注销该模块全部 agent job（无声明无副作用）
         from modules.registry_index import invalidate
         invalidate()
     return ok
@@ -244,6 +301,8 @@ def uninstall(name: str, keep_data: bool = True) -> bool:
             save_sched_state(state)
         from bridge.permissions import refresh_permissions
         refresh_permissions()  # 卸载后撤销该模块豁免
+        from bridge.jobs import unregister_jobs
+        unregister_jobs(name)  # 卸载 → 注销该模块 agent job（无声明无副作用）
         from modules.registry_index import invalidate
         invalidate()
         return True
@@ -320,6 +379,16 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv[0] == "--reissue-token" and len(argv) >= 2:
         return 0 if reissue_token(argv[1]) else 1
+
+    if argv[0] == "--sync-jobs" and len(argv) >= 2:
+        from bridge.jobs import sync_jobs
+        r = sync_jobs(argv[1])
+        if not r["ok"]:
+            print(f"[register] sync-jobs: {r.get('error', '失败')}")
+            return 1
+        print(f"[register] {argv[1]} job 已渲染: {r['job']['title']} @ {r['job']['schedule']}")
+        print(r.get("install_hint", ""))
+        return 0
 
     # 注册/更新（G1 分流：已存在模块 → update_module 不换 token；新模块 → register_module 发卡）
     name = argv[0]

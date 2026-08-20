@@ -1,12 +1,13 @@
-"""天气/花粉（Open-Meteo + 内蒙古疾控），含共享缓存。
+"""天气（Open-Meteo，location 驱动），含共享缓存 + 气象预警。
 
-- fetch_weather / fetch_pollen：实时抓取（各带 3 次重试）
-- get_weather：带 TTL 缓存的天气（跨模块共享，默认 30 分钟）
+- fetch_weather：实时抓取（带 3 次重试）；get_weather：带 TTL 缓存（默认 30 分钟，跨模块共享）
+- weather_alerts：基于当日天气 code 的恶劣天气预警（暴雨/雷暴/大雪等；洪水等专用预警接口后续查证接入）
 
 天气城市优先级：location.json 坐标（区级基准，选定/定位时写入）
 → city 名 geocoding（兼容旧版英文名数据如 Jining；新版为中文名，
   Open-Meteo 中文支持有限常查不到，失败即落 en 分支）→ 拼音 en 兜底
 → 回退 DEFAULT_LOC（北京）。
+注：花粉等地方性数据已移出 → common.localdata（weather 只做纯天气）。
 """
 from __future__ import annotations
 
@@ -31,10 +32,11 @@ WEATHER_CODES = {
     95: ("⛈️", "雷暴"), 96: ("⛈️", "雷暴冰雹"), 99: ("⛈️", "大冰雹"),
 }
 
-# --- 花粉指数（内蒙古疾控欢舒花粉预报，nmgcdc.zw.nm.cn/pollen；当前经第三方域名 nmgcdc.qcurl.cn 转发）---
-POLLEN_API = "https://nmgcdc.qcurl.cn/api/forecast"
-POLLEN_CITY = "乌兰察布"  # 集宁属乌兰察布市
-POLLEN_LEVEL_TAG = {"低": "可正常出行", "较低": "注意防护", "中": "特别敏感人群注意", "较高": "遵医嘱用药", "高": "非必要不外出"}
+# 恶劣天气 → 预警提示（早报天气段附言用；洪水等专用预警接口查证后另接）
+ALERT_CODES = {
+    65: "大雨", 75: "大雪", 82: "暴雨", 95: "雷暴", 96: "雷暴伴冰雹", 99: "大冰雹",
+}
+_ALERT_TTL = 1800.0  # 预警 code 缓存（与天气同节奏，30 分钟）
 
 
 def http_get_json(url: str, timeout: int = 15, attempts: int = 3, delay: float = 2.0) -> dict | None:
@@ -83,16 +85,39 @@ def fetch_weather() -> str:
 
 
 def fetch_pollen(today=None) -> str:
-    """内蒙古疾控花粉浓度（乌兰察布/集宁）。返回"花粉：中（…）"；失败返回"花粉：获取失败"。"""
-    from datetime import date
-    d = (today or date.today()).isoformat()
-    url = f"{POLLEN_API}?city={urllib.parse.quote(POLLEN_CITY)}&date={d}"
-    data = http_get_json(url)
-    if not data or not data.get("level"):
-        return "花粉：获取失败"
-    level = data["level"]
-    tag = POLLEN_LEVEL_TAG.get(level)
-    return f"花粉：{level}" + (f"（{tag}）" if tag else "")
+    """（已移出）花粉归 common.localdata，此处占位防旧引用崩溃。"""
+    raise NotImplementedError("花粉已移至 common.localdata（fetch('pollen')）")
+
+
+def weather_alerts(use_cache: bool = True, ttl: float = _ALERT_TTL) -> list[str]:
+    """恶劣天气预警提示（基于当日天气 code 映射）。
+
+    返回如 ["暴雨预警", "雷暴预警"]；无恶劣天气返回 []。code 带共享缓存（30 分钟）。
+    """
+    code = _current_code(use_cache, ttl)
+    if code is None:
+        return []
+    desc = ALERT_CODES.get(code)
+    return [f"{desc}预警"] if desc else []
+
+
+def _current_code(use_cache: bool = True, ttl: float = _ALERT_TTL) -> int | None:
+    """当前天气 code（带共享缓存 weather_code_cache）；失败返回 None。"""
+    if use_cache:
+        cache = shared_load("weather_code_cache")
+        if cache.get("code") is not None and time.time() - cache.get("ts", 0) < ttl:
+            return cache["code"]
+    loc = get_location()
+    lat, lon = loc.get("lat"), loc.get("lon")
+    if lat is None or lon is None:
+        return None
+    w = http_get_json(f"{WEATHER_API}?latitude={lat}&longitude={lon}&current_weather=true")
+    if not w or "current_weather" not in w:
+        return None
+    code = w["current_weather"].get("weathercode")
+    if code is not None:
+        shared_save("weather_code_cache", {"code": code, "ts": time.time()})
+    return code
 
 
 def get_weather(use_cache: bool = True, ttl: float = 1800.0) -> str:

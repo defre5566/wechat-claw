@@ -1,20 +1,21 @@
-"""用户位置数据面：location.json（选定城市三件套 + code）+ .prev 撤销。
+"""用户位置数据面：location.json（选定城市三件套 + code + province）+ .prev 撤销。
 
-结构：{code, city, en, lat, lon}
+结构：{code, city, en, lat, lon, province}
 - code：cities.json 条目 code（6 位，前端联动高亮用）
 - city：中文名（天气显示名）
 - en：拼音（Open-Meteo geocoding 中文查不到时的英文兜底）
 - lat/lon：区级中心坐标（天气直接按坐标查，区级基准）
+- province：省份（地方性数据判定用，如花粉=内蒙古 / 台风=沿海；GUI 选城市时写入）
 
 GUI 经 set_city 写入（地区选择器选定 / 定位授权）；模块经 get_location 消费。
 旧数据兼容：旧格式（仅 city 英文名如 Jining）city 有值即正常返回，
-lat/lon 为空时天气层走 geocoding 兜底（英文名可查到）。
+lat/lon 为空时天气层走 geocoding 兜底（英文名可查到）；province 缺省为空。
 """
 from __future__ import annotations
 
 from . import _userdata
 
-FIELDS = ("code", "city", "en", "lat", "lon")
+FIELDS = ("code", "city", "en", "lat", "lon", "province")
 
 
 def get_location() -> dict:
@@ -30,10 +31,10 @@ def get_city() -> str:
     return str(get_location().get("city", ""))
 
 
-def set_city(city: str, en: str = "", lat=None, lon=None, code: str = "") -> bool:
+def set_city(city: str, en: str = "", lat=None, lon=None, code: str = "", province: str = "") -> bool:
     """写用户位置（自动备份 prev，供撤销）。"""
     data = {"code": code or "", "city": city, "en": en or "",
-            "lat": lat, "lon": lon}
+            "lat": lat, "lon": lon, "province": province or ""}
     return _userdata.save("location", data)
 
 
