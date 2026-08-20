@@ -970,11 +970,29 @@
   function openModuleSettings(name) {
     api.post("/api/admin/module/get", { name: name }).then(function (d) {
       if (!d.module) { alert("模块不存在"); return; }
+      window._locServices = d.module.location_services || [];
       document.getElementById("moduleModalTitle").textContent = name + "-设置";
-      document.getElementById("moduleModalBody").innerHTML = renderModuleForm(d.module);
+      document.getElementById("moduleModalBody").innerHTML =
+        renderModuleForm(d.module) + renderPromptImport(d.module);
       applyShowWhen();
       open("moduleModal");
     }).catch(function (e) { alert(e.message); });
+  }
+
+  /* 自定义方向导入区（模块 settings_schema 含 choice 字段时显示，纯通用） */
+  function renderPromptImport(m) {
+    var hasChoice = false;
+    (m.settings_schema || []).forEach(function (sec) {
+      (sec.fields || []).forEach(function (f) { if (f.type === "choice") hasChoice = true; });
+    });
+    if (!hasChoice) return "";
+    return '<div class="modal-section-title" style="margin-top:18px">导入自定义方向</div>' +
+      '<div id="prompt-import" style="margin-top:6px">' +
+        '<input type="text" id="pf-direction" placeholder="方向名（如：科技）" style="width:180px">' +
+        '<textarea id="pf-prompt" placeholder="自定义方向简报 prompt（纯文本，覆盖基底中该方向的生成要求）" rows="3" style="width:100%;margin:6px 0;box-sizing:border-box;font-size:13px"></textarea>' +
+        '<button class="btn btn-secondary" id="pf-import-btn" style="font-size:13px">导入方向</button>' +
+        '<span class="modal-desc" style="margin-left:10px">导入后出现在上方词条中（✕ 可删），保存设置后随简报生成生效。</span>' +
+      '</div>';
   }
 
   function renderModuleForm(m) {
@@ -1042,11 +1060,27 @@
       ctl = '<input type="text" class="sf-tags" data-key="' + esc(f.key) + '" data-type="tags" value="' + esc((val || []).join(",")) + '" placeholder="逗号分隔，每词一个">';
     } else if (type === "number") {
       ctl = '<input type="number" class="sf-field" data-key="' + esc(f.key) + '" data-type="number" value="' + esc(val == null ? "" : val) + '">';
+    } else if (type === "choice") {
+      /* 词条选择器：候选 = 预设（只读）+ 自定义（✕ 可删）；≤ max 约束 */
+      var cands = f.candidates || [];
+      var sel = (Array.isArray(val) ? val : []).slice();
+      var max = f.max || 99;
+      ctl = '<div class="sf-choice" data-key="' + esc(f.key) + '" data-type="choice" data-max="' + max + '">' +
+        cands.map(function (c) {
+          var v = typeof c === "object" ? c.value : c;
+          var preset = typeof c === "object" ? !!c.preset : true;
+          var on = sel.indexOf(v) !== -1;
+          var dis = (!on && sel.length >= max) ? " disabled" : "";
+          return '<button type="button" class="chip' + (on ? " on" : "") + '" data-v="' + esc(v) + '"' + dis + '>' +
+            esc(v) + (preset ? "" : '<span class="chip-x" data-del="' + esc(v) + '" title="删除自定义方向">✕</span>') +
+            '</button>';
+        }).join("") + '</div>';
     } else {
       ctl = '<input type="text" class="sf-field" data-key="' + esc(f.key) + '" data-type="' + esc(type) + '" value="' + esc(val == null ? "" : val) + '"' + (type === "path" ? ' placeholder="如 ~/vault"' : "") + '>';
     }
     var show = f.show_when ? ' data-show-when="' + esc(JSON.stringify(f.show_when)) + '"' : "";
-    return '<div class="form-row sf-row"' + show + '><label>' + esc(f.desc || f.key) + '</label>' + ctl + '</div>';
+    var svc = f.show_when_service ? ' data-show-service="' + esc(f.show_when_service) + '"' : "";
+    return '<div class="form-row sf-row"' + show + svc + '><label>' + esc(f.desc || f.key) + '</label>' + ctl + '</div>';
   }
 
   function collectSettings(root) {
@@ -1061,6 +1095,13 @@
       else if (type === "number") s[key] = el.value === "" ? null : parseInt(el.value, 10);
       else s[key] = el.value;
     });
+    root.querySelectorAll(".sf-choice").forEach(function (box) {
+      var key = box.getAttribute("data-key");
+      if (!key) return;
+      var sel = [];
+      box.querySelectorAll(".chip.on").forEach(function (c) { sel.push(c.getAttribute("data-v")); });
+      s[key] = sel;
+    });
     return s;
   }
 
@@ -1074,6 +1115,12 @@
       var show = true;
       Object.keys(cond).forEach(function (k) { if (vals[k] !== cond[k]) show = false; });
       row.style.display = show ? "" : "none";
+    });
+    /* 运行时服务条件（show_when_service）：位置不在服务区域 → 隐藏（如花粉仅内蒙古） */
+    var services = window._locServices || [];
+    root.querySelectorAll(".sf-row[data-show-service]").forEach(function (row) {
+      var svc = row.getAttribute("data-show-service");
+      if (svc && services.indexOf(svc) === -1) row.style.display = "none";
     });
   }
 
@@ -1097,6 +1144,51 @@
   /* 弹窗内容 change 时联动显隐（如 data_source 切换） */
   document.addEventListener("change", function (e) {
     if (e.target && e.target.closest && e.target.closest("#settings-root")) applyShowWhen();
+  });
+
+  /* choice 词条：点击切换选中（≤max 约束）；✕ 删除自定义方向 */
+  document.addEventListener("click", function (e) {
+    if (!e.target || !e.target.closest) return;
+    var root = document.getElementById("settings-root");
+    if (!root || !root.contains(e.target)) return;
+    var modName = (document.getElementById("moduleModalTitle").textContent || "").replace("-设置", "");
+    var x = e.target.closest(".chip-x");
+    if (x) {
+      var delName = x.getAttribute("data-del");
+      if (!confirm("删除自定义方向「" + delName + "」？")) return;
+      api.post("/api/admin/module/prompt_delete", { name: modName, direction: delName })
+        .then(function () { openModuleSettings(modName); })
+        .catch(function (err) { alert(err.message); });
+      return;
+    }
+    var chip = e.target.closest(".chip");
+    if (!chip || chip.disabled) return;
+    var box = chip.closest(".sf-choice");
+    if (!box) return;
+    var max = parseInt(box.getAttribute("data-max") || "99", 10);
+    var sel = [];
+    box.querySelectorAll(".chip.on").forEach(function (c) { sel.push(c.getAttribute("data-v")); });
+    var v = chip.getAttribute("data-v");
+    var idx = sel.indexOf(v);
+    if (idx !== -1) { sel.splice(idx, 1); chip.classList.remove("on"); }
+    else if (sel.length < max) { sel.push(v); chip.classList.add("on"); }
+    box.querySelectorAll(".chip").forEach(function (c) {
+      if (!c.classList.contains("on") && sel.length >= max) c.disabled = true;
+      else c.disabled = false;
+    });
+  });
+
+  /* 自定义方向导入（choice 字段模块通用） */
+  document.addEventListener("click", function (e) {
+    if (e.target && e.target.id === "pf-import-btn") {
+      var modName = (document.getElementById("moduleModalTitle").textContent || "").replace("-设置", "");
+      var direction = document.getElementById("pf-direction").value.trim();
+      var prompt = document.getElementById("pf-prompt").value.trim();
+      if (!direction || !prompt) { alert("方向名与内容必填"); return; }
+      api.post("/api/admin/module/prompt_add", { name: modName, direction: direction, prompt: prompt })
+        .then(function () { openModuleSettings(modName); })
+        .catch(function (err) { alert(err.message); });
+    }
   });
 
   function esc(s) {
@@ -1143,6 +1235,13 @@
       loadModules();  // 刷新列表（用途可能变了）
     }).catch(function (e) { alert(e.message); });
   });
+
+  /* ---- choice 词条选择器 ---- */
+  .chip { display:inline-block; padding:3px 12px; margin:2px 5px 2px 0; border:1px solid #bbb; border-radius:12px; background:#fff; cursor:pointer; font-size:13px; color:#333; }
+  .chip.on { background:#1a5; border-color:#1a5; color:#fff; }
+  .chip:disabled { opacity:.4; cursor:not-allowed; }
+  .chip-x { margin-left:6px; color:#d33; cursor:pointer; font-size:12px; }
+  .chip.on .chip-x { color:#ffd; }
 
   /* ---- 删除模块：二次确认弹窗（小圆圈：删/不删用户数据，默认不勾） ---- */
   var _delModule = null;

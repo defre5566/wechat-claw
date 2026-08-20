@@ -175,6 +175,8 @@ ROUTES = {
     ("POST", "/api/admin/sources/refresh"): _h("admin", "source_refresh", True),
     ("POST", "/api/admin/module/get"): _h("admin", "module_get", True),
     ("POST", "/api/admin/module/update"): _h("admin", "module_update", True),
+    ("POST", "/api/admin/module/prompt_add"): _h("admin", "module_prompt_add", True),
+    ("POST", "/api/admin/module/prompt_delete"): _h("admin", "module_prompt_delete", True),
 }
 
 

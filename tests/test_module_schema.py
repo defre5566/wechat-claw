@@ -26,6 +26,17 @@ def test_choice_valid():
     assert ok and clean["briefing_topics"] == ["时政", "热点"] and not errs
 
 
+def test_choice_object_candidates():
+    """candidates 为对象数组（{value, preset}，web 注入形态）也能匹配。"""
+    schema = [{"section": "s", "fields": [
+        {"key": "t", "type": "choice", "max": 3, "candidates": [
+            {"value": "热点", "preset": True}, {"value": "时政", "preset": True},
+            {"value": "科技", "preset": False}]},
+    ]}]
+    ok, clean, errs = validate_module_settings(schema, {"t": ["热点", "时政", "已删除"]})
+    assert ok and clean["t"] == ["热点", "时政"] and not errs
+
+
 def test_choice_empty_allowed():
     """不选（空列表）允许保存。"""
     ok, clean, errs = validate_module_settings(SCHEMA, {"briefing_topics": []})

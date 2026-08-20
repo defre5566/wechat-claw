@@ -123,7 +123,8 @@ def validate_module_settings(
         if field.get("type") == "choice":
             cands = field.get("candidates") or []
             if cands:
-                cv = [x for x in cv if x in cands]  # 非法候选静默过滤（候选可变）
+                vals = [c.get("value") if isinstance(c, dict) else c for c in cands]
+                cv = [x for x in cv if x in vals]  # 非法候选静默过滤（候选可变）
             mx = field.get("max")
             if mx and len(cv) > int(mx):
                 errors.append(f"{field.get('desc') or key} 最多选择 {mx} 项")

@@ -300,6 +300,105 @@ def logs_tail(app, body: dict | None = None) -> dict:
 
 # ---------- 模块（经 register.py / build_index） ----------
 
+# ---------- choice 候选 / 位置服务（模块弹窗渲染数据装配，纯通用机制） ----------
+
+def _module_choices(name: str) -> list[dict]:
+    """choice 字段候选：模块 directions.json 键（预设，只读）+ 数据区 prompts/custom/*.json（自定义，可删）。"""
+    from modules.register import MODULES_DIR, module_data_dir
+    out: list[dict] = []
+    dj = MODULES_DIR / name / "directions.json"
+    if dj.is_file():
+        try:
+            data = json.loads(dj.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for k in data:
+                    out.append({"value": k, "preset": True})
+        except Exception:
+            pass
+    custom_dir = module_data_dir(name) / "prompts" / "custom"
+    if custom_dir.is_dir():
+        for f in sorted(custom_dir.glob("*.json")):
+            out.append({"value": f.stem, "preset": False})
+    return out
+
+
+def _enrich_module(m: dict, name: str) -> None:
+    """弹窗渲染数据装配：choice 候选注入 + 位置服务列表（show_when_service 前端显隐用）。"""
+    schema = m.get("settings_schema")
+    if isinstance(schema, list):
+        choices = _module_choices(name)
+        for section in schema:
+            for field in section.get("fields") or []:
+                if isinstance(field, dict) and field.get("type") == "choice":
+                    field["candidates"] = choices
+    from modules.common.localdata import available as _avail
+    from modules.common.location import get_location
+    try:
+        m["location_services"] = _avail(get_location())
+    except Exception:
+        m["location_services"] = []
+
+
+_DIRECTION_RE = None
+
+
+def _valid_direction(name: str) -> bool:
+    """方向名白名单：中文/字母/数字/下划线/短横线，≤24 字符（防路径穿越）。"""
+    global _DIRECTION_RE
+    if _DIRECTION_RE is None:
+        import re
+        _DIRECTION_RE = re.compile(r"^[\w\u4e00-\u9fa5-]{1,24}$")
+    return bool(_DIRECTION_RE.match(name or ""))
+
+
+def module_prompt_add(app, body: dict | None = None) -> dict:
+    """导入自定义简报方向 prompt：写数据区 prompts/custom/<方向名>.json（明文，用户可看可改）。
+
+    同方向名覆盖；保存后 update_module 联动刷新简报 job。
+    """
+    body = body or {}
+    name = str(body.get("name", "")).strip()
+    direction = str(body.get("direction", "")).strip()
+    prompt = str(body.get("prompt", "")).strip()
+    if not name or not direction or not prompt:
+        return {"ok": False, "error": "模块名、方向名与内容必填"}, 400
+    if not _valid_direction(direction):
+        return {"ok": False, "error": "方向名仅允许中文/字母/数字/下划线/短横线，≤24 字符"}, 400
+    from modules.register import module_data_dir, update_module
+    dd = module_data_dir(name)
+    if not dd.is_dir():
+        return {"ok": False, "error": "模块不存在"}, 404
+    custom_dir = dd / "prompts" / "custom"
+    custom_dir.mkdir(parents=True, exist_ok=True)
+    f = custom_dir / f"{direction}.json"
+    tmp = f.with_name(f.name + ".tmp")
+    tmp.write_text(json.dumps({"prompt": prompt}, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(f)
+    update_module(name, settings=None)  # 触发 job 联动（prompt 变化 → 重登记）
+    return {"ok": True, "direction": direction}
+
+
+def module_prompt_delete(app, body: dict | None = None) -> dict:
+    """删除自定义简报方向（数据区 custom/<方向名>.json）。"""
+    body = body or {}
+    name = str(body.get("name", "")).strip()
+    direction = str(body.get("direction", "")).strip()
+    if not name or not direction:
+        return {"ok": False, "error": "模块名与方向名必填"}, 400
+    if not _valid_direction(direction):
+        return {"ok": False, "error": "方向名非法"}, 400
+    from modules.register import module_data_dir, update_module
+    f = module_data_dir(name) / "prompts" / "custom" / f"{direction}.json"
+    try:
+        if f.is_file():
+            f.unlink()
+            update_module(name, settings=None)  # 触发 job 联动（方向减少 → 重登记）
+            return {"ok": True}
+        return {"ok": False, "error": "方向不存在"}, 404
+    except OSError as e:
+        return {"ok": False, "error": str(e)}, 500
+
+
 def modules_list(app, body: dict | None = None) -> dict:
     """全量模块列表（含禁用）：register.list_modules（G4：花名册替代排班表）。
 
@@ -310,11 +409,13 @@ def modules_list(app, body: dict | None = None) -> dict:
 
 
 def module_get(app, body: dict | None = None) -> dict:
-    """读单个模块完整配置（弹窗渲染用）：enabled/schedule/retry/inbound。"""
+    """读单个模块完整配置（弹窗渲染用）：enabled/schedule/retry/inbound + 渲染数据装配。"""
     from modules.register import get_module
-    m = get_module((body or {}).get("name", ""))
+    name = (body or {}).get("name", "")
+    m = get_module(name)
     if m is None:
         return {"ok": False, "error": "模块不存在"}, 404
+    _enrich_module(m, name)
     return {"ok": True, "module": m}
 
 
@@ -332,8 +433,10 @@ def module_update(app, body: dict | None = None) -> dict:
         return {"ok": False, "error": "模块不存在"}, 404
     settings = body.get("settings")
     if settings is not None:
+        _enrich_module(m, name)  # choice 候选 + 位置服务（show_when_service 校验用）
         from web.schema.module_schema import validate_module_settings
-        ok, clean, errors = validate_module_settings(m.get("settings_schema"), settings)
+        ok, clean, errors = validate_module_settings(
+            m.get("settings_schema"), settings, services=m.get("location_services"))
         if not ok:
             return {"ok": False, "error": "；".join(errors)}, 400
     else:
