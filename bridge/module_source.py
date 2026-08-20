@@ -238,8 +238,10 @@ def _validate_structure(mod_dir: Path, name: str, manifest_entry: dict) -> str |
     if data.get("name") != name:
         return f"module.json 模块名({data.get('name')!r})与清单({name!r})不一致"
     worker = mod_dir / f"{name}_worker.py"
-    if not worker.is_file():
-        return f"缺少 {name}_worker.py"
+    if not worker.is_file():  # 大小写兼容（如 Planner → planner_worker.py）
+        worker = mod_dir / f"{name.lower()}_worker.py"
+        if not worker.is_file():
+            return f"缺少 {name}_worker.py"
     return None
 
 
