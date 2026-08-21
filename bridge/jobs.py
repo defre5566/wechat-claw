@@ -17,7 +17,9 @@ import sys
 from datetime import date
 from pathlib import Path
 
-MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"
+from bridge.config import MODULES_ROOT
+
+MODULES_DIR = MODULES_ROOT
 DATA_ROOT = MODULES_DIR / "modules_data"
 # 测试隔离点（与 permissions/module_source 同源）
 if os.environ.get("OPENCODE_PERMS_ROOT"):

@@ -50,8 +50,9 @@ def jobs_dir() -> Path:
 
 
 def _vendor_supervisor() -> Path:
-    """vendor 的 supervisor.pl（项目仓库内）。"""
-    return Path(__file__).resolve().parent.parent / "vendor" / "opencode-scheduler" / "supervisor.pl"
+    """vendor 的 supervisor.pl（只读资源，打包形态随 exe 解包目录提供）。"""
+    from bridge.config import RESOURCE_ROOT
+    return RESOURCE_ROOT / "vendor" / "opencode-scheduler" / "supervisor.pl"
 
 
 def _cron_to_oncalendar(expr: str) -> str | None:
@@ -118,7 +119,8 @@ def build_job(module: str, name: str, schedule: str, prompt: str,
               timeout: int = 1800, workdir: str | None = None) -> dict:
     """组装 supervisor 认识的 job 定义（定稿：scopeId=wechat-claw，slug=<模块名>-<任务名>）。"""
     slug = f"{module}-{name}"
-    workdir = workdir or str(Path(__file__).resolve().parent.parent)
+    from bridge.config import WORK_ROOT
+    workdir = workdir or str(WORK_ROOT)
     return {
         "name": name,
         "slug": slug,

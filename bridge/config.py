@@ -28,6 +28,13 @@ DEPLOY_ROOT = (Path(_sys.executable).resolve().parent if _FROZEN else PROJECT_RO
 RESOURCE_ROOT = (Path(getattr(_sys, "_MEIPASS", PROJECT_ROOT)) if _FROZEN else PROJECT_ROOT)  # 资源根
 CONFIG_FILE = DEPLOY_ROOT / ".config" / "config.yaml"
 
+# 运行时根：源码形态 = 项目根；打包形态 = 可执行文件旁（用户数据区）。
+# 模块系统（registry/register/module_source/scheduler/jobs/permissions）与
+# bridge 工作区（logs/inbox/_archive/agent-SDK/状态文件）统一以 WORK_ROOT 定位——
+# 打包形态下 __file__ 指向只读临时解包目录，落盘必须走这里，否则重启即丢。
+WORK_ROOT = DEPLOY_ROOT if _FROZEN else PROJECT_ROOT
+MODULES_ROOT = WORK_ROOT / "modules"
+
 # ---- 运行参数（bridge 内置，不可被配置文件覆盖）----
 DEFAULTS_RUNTIME: dict = {
     "push": {

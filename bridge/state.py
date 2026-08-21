@@ -18,8 +18,9 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from .config import get as get_cfg
+from bridge.config import WORK_ROOT
 
-WORKDIR = Path(__file__).resolve().parent.parent  # 项目根（相对定位，任意目录部署自洽）
+WORKDIR = WORK_ROOT  # 运行时根（打包形态=exe 旁，__file__ 指向只读解包目录不可落盘）
 ARCHIVE_DIR = WORKDIR / "_archive"
 SDK_DIR = WORKDIR / "agent-SDK"
 TOKEN_FILE = SDK_DIR / "push_token"

@@ -21,16 +21,15 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# 项目根：按本文件位置定位（bridge/ 的上级），不依赖 cwd 或固定家目录路径；
-# 与 registry_index / common.log 的相对定位一致，任意目录部署自洽
-WORKDIR = Path(__file__).resolve().parent.parent
+from .config import get as get_cfg, WORK_ROOT
+
+# 运行时根：按部署形态定位（打包形态 = 可执行文件旁，用户数据区）
+WORKDIR = WORK_ROOT
 sys.path.insert(0, str(WORKDIR))
 
 from wechat_agent_sdk.api.client import SessionExpiredError
 from wechat_agent_sdk.transport import WeChatTransport
 from wechat_agent_sdk.types import ChatRequest
-
-from .config import get as get_cfg
 
 from .push_server import PUSH_AGENT_TYPES, PUSH_DIRECT_TYPES, PUSH_HOST, PUSH_PORT, start_push_server
 from .scheduler import MODULES_DIR, RUN_TIMEOUT, run_module, scheduler

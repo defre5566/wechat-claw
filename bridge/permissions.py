@@ -15,9 +15,11 @@ import os
 import sys
 from pathlib import Path
 
-MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"
+from bridge.config import MODULES_ROOT, WORK_ROOT
+
+MODULES_DIR = MODULES_ROOT
 DATA_ROOT = MODULES_DIR / "modules_data"
-CONFIG_DIR = Path(__file__).resolve().parent.parent / ".config"
+CONFIG_DIR = WORK_ROOT / ".config"
 PERMS_FILE = CONFIG_DIR / "module-permissions.json"
 
 # 测试隔离点

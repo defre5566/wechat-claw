@@ -13,9 +13,10 @@ import sys
 import time
 from pathlib import Path
 
+from bridge.config import MODULES_ROOT
 from bridge.state import _keep_key, _keep_ts_key, prune_state_file  # noqa: F401  re-export
 
-SHARED_DIR = Path(__file__).resolve().parent / "shared"
+SHARED_DIR = MODULES_ROOT / "common" / "shared"
 
 
 def load_sent_json(path: Path) -> dict:

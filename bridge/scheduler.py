@@ -16,13 +16,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import get as get_cfg
+from bridge.config import MODULES_ROOT
 from modules.registry_index import build_index
 
 from .state import SCHED_STATE_FILE, load_sched_state, prune_state_file, save_sched_state
 
 log = logging.getLogger("wechat-bridge")
 
-MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"  # 与 registry_index 一致（相对定位）
+MODULES_DIR = MODULES_ROOT  # 与 registry_index 一致（运行时根，打包形态=exe 旁）
 RUN_TIMEOUT = get_cfg("scheduler.run_timeout_seconds")  # 模块子进程超时保护（秒）
 
 # G3：window 重叠规则被窗格拦截的告警去重（进程内存级 {name:hour_key:rid}，防刷屏）

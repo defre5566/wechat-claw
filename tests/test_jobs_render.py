@@ -77,7 +77,7 @@ def test_render_job_prompt_placeholders(tmp_path, monkeypatch):
     assert "时政：高层人事、政策发布" in job["prompt"]             # 方向关键词
     assert job["slug"] == "morning-briefing"
     assert job["timeoutSeconds"] == 1800
-    assert job["output_dir"].endswith("modules_data/Planner/briefing")
+    assert Path(job["output_dir"]).parts[-3:] == ("modules_data", "Planner", "briefing")
 
 
 def test_render_job_custom_prompt(tmp_path, monkeypatch):

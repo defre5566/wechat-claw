@@ -14,7 +14,9 @@ import logging
 import time
 from pathlib import Path
 
-MODULES_DIR = Path(__file__).resolve().parent
+from bridge.config import MODULES_ROOT
+
+MODULES_DIR = MODULES_ROOT
 
 log = logging.getLogger("wechat-bridge")  # 与 bridge 同 logger（common/log.py 配置）
 

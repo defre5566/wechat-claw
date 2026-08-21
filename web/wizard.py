@@ -338,6 +338,21 @@ class Handler(BaseHTTPRequestHandler):
 
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
+    # 打包形态 bridge 模式：`wechat-claw -m bridge.main`（service_up / nssm 启动命令）
+    if len(argv) >= 2 and argv[0] == "-m" and argv[1] == "bridge.main":
+        from bridge import main as bridge_main
+
+        try:
+            import asyncio
+            asyncio.run(bridge_main.main())
+        except KeyboardInterrupt:
+            pass
+        except SystemExit:
+            raise  # 未登录等语义：非零退出码透传（服务管理器可见）
+        except Exception as e:  # noqa: BLE001
+            print(f"[wizard] bridge 启动失败: {e}")
+            return 1
+        return 0
     port = PORT
     for i, a in enumerate(argv):
         if a == "--port" and i + 1 < len(argv):

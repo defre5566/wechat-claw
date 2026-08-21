@@ -20,7 +20,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-MODULES_DIR = Path(__file__).resolve().parent.parent / "modules"
+from bridge.config import MODULES_ROOT
+
+MODULES_DIR = MODULES_ROOT
 DATA_ROOT = MODULES_DIR / "modules_data"
 SOURCES_FILE = DATA_ROOT / "sources.json"
 

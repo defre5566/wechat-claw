@@ -9,9 +9,9 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from bridge.config import get
+from bridge.config import WORK_ROOT, get
 
-WORKDIR = Path(__file__).resolve().parent.parent.parent
+WORKDIR = WORK_ROOT  # 运行时根（打包形态=exe 旁，__file__ 指向只读解包目录不可落盘）
 LOG_DIR = WORKDIR / "logs"
 LOG_FILE = LOG_DIR / "system.log"
 

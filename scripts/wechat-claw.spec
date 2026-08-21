@@ -20,7 +20,14 @@ _ROOT = _SPEC_DIR.parent
 
 # 动态导入的 handlers（importlib 加载，静态分析看不到）
 hiddenimports = collect_submodules("web.handlers")
-hiddenimports += ["web.auth", "web.agent_gen", "web.schema.config_schema"]
+hiddenimports += [
+    "web.auth",
+    "web.agent_gen",
+    "web.schema.config_schema",
+    "web.schema.module_schema",  # admin 函数内延迟 import，显式收集
+]
+# vendor SDK 为 editable 安装（PEP 660），PyInstaller 静态分析收集不到，显式全量收集
+hiddenimports += ["wechat_agent_sdk"] + collect_submodules("wechat_agent_sdk")
 
 # 数据文件（打包后位于 _MEIPASS 根，RESOURCE_ROOT 逻辑读取）
 datas = [
@@ -29,6 +36,7 @@ datas = [
     (str(_ROOT / "config.yaml.example"), "."),
     (str(_ROOT / "AGENTS.md"), "."),
     (str(_ROOT / "opencode.jsonc.example"), "."),
+    (str(_ROOT / "vendor" / "opencode-scheduler"), "vendor/opencode-scheduler"),
 ]
 if sys.platform == "win32":
     # Windows 服务化依赖 nssm（service_up 从 RESOURCE_ROOT 读取）
@@ -36,7 +44,7 @@ if sys.platform == "win32":
 
 a = Analysis(
     [str(_ROOT / "web" / "wizard.py")],
-    pathex=[str(_ROOT)],
+    pathex=[str(_ROOT), str(_ROOT / "vendor")],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,

@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x64
+          - os: macos-latest
+            suffix: macos-x64
+          - os: windows-latest
+            suffix: windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Install vendored SDK (editable)
+        run: pip install -e ./vendor/wechat_agent_sdk
+      - name: Tests
+        run: pytest tests/ -q
+      - name: Build
+        run: python scripts/build.py
+      - name: Smoke test (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          dist/wechat-claw &
+          PID=$!
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8650/api/state && break
+            sleep 1
+          done
+          kill $PID || true
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\wechat-claw.exe" -PassThru
+          for ($i = 0; $i -lt 20; $i++) {
+            Start-Sleep -Seconds 1
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8650/api/state" -UseBasicParsing -TimeoutSec 3
+              if ($r.StatusCode -eq 200) { break }
+            } catch {}
+          }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      - name: Rename artifact
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            mv dist/wechat-claw.exe dist/wechat-claw-${VERSION}-windows-x64.exe
+          else
+            mv dist/wechat-claw dist/wechat-claw-${VERSION}-${{ matrix.suffix }}
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wechat-claw-${{ matrix.suffix }}
+          path: dist/wechat-claw-*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          gh release create "$GITHUB_REF_NAME" assets/* \
+            --title "wechat-claw ${VERSION}" \
+            --notes "wechat-claw ${VERSION}：Windows / macOS / Linux 三端单文件可执行产物。" \
+            --repo "$GITHUB_REPOSITORY"

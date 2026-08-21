@@ -25,6 +25,9 @@ MODULES_DIR = Path(__file__).resolve().parent
 if str(MODULES_DIR.parent) not in sys.path:
     sys.path.insert(0, str(MODULES_DIR.parent))
 
+from bridge.config import MODULES_ROOT  # noqa: E402  （sys.path 就绪后导入）
+
+MODULES_DIR = MODULES_ROOT
 DATA_ROOT = MODULES_DIR / "modules_data"  # 模块用户数据根（代码/数据分家）
 
 
