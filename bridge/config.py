@@ -55,7 +55,7 @@ DATA_ROOT = Path(_os.environ.get("WC_DATA_ROOT")
 # 模块源签名公钥（Ed25519，作者私钥签名 manifest.sig；空 = 未启用签名校验，
 # 发布前保持；发布时经 scripts/gen_signing_key.py 生成并填入）——防源仓库账号被盗
 # 时恶意模块自动进入部署机（账号被盗者无私钥签不出合法包）
-SIGNING_PUBLIC_KEY: str = ""
+SIGNING_PUBLIC_KEY: str = "f2c2236c4a06c9140b0de3a9b9017cd0b4326506cd9aaee19ee03a5d1d8c2df3"
 
 # 运行时根 = 数据根：模块系统（registry/register/module_source/scheduler/jobs/permissions）
 # 与 bridge 工作区（logs/inbox/_archive/agent-SDK/状态文件）统一以 WORK_ROOT 定位——
