@@ -55,6 +55,10 @@ WORK_ROOT = DATA_ROOT
 MODULES_ROOT = WORK_ROOT / "modules"
 CONFIG_FILE = WORK_ROOT / ".config" / "config.yaml"
 
+# 微信 SDK 存储（accounts.json 等）收敛到数据根：SDK 已打补丁支持该环境变量重定向
+# （vendor 快照 + site-packages 双形态都经 apply_patches 打上；未打时回落 ~/.wechat-agent-sdk）
+_os.environ.setdefault("WECHAT_AGENT_SDK_STATE_DIR", str(WORK_ROOT / "agent-SDK"))
+
 # ---- 运行参数（bridge 内置，不可被配置文件覆盖）----
 DEFAULTS_RUNTIME: dict = {
     "push": {

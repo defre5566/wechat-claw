@@ -141,6 +141,13 @@ class ConfirmAcpAgent(AcpAgent):
         spawn_env = {**os.environ, **(self._env or {})}
         if self._permission_mode:
             spawn_env.setdefault("ACP_PERMISSION_MODE", self._permission_mode)
+        # opencode 收敛隔离：仅向导安装的（标记存在）把 XDG 数据收敛到 wechat-claw 数据根；
+        # 用户原有的 opencode 不注入，保持默认位置（原配置/登录态照常用）
+        from bridge.config import DATA_ROOT
+        if (DATA_ROOT / ".config" / "opencode-installed.json").is_file():
+            spawn_env.setdefault("XDG_DATA_HOME", str(DATA_ROOT / "opencode" / "data"))
+            spawn_env.setdefault("XDG_CONFIG_HOME", str(DATA_ROOT / "opencode" / "config"))
+            spawn_env.setdefault("XDG_CACHE_HOME", str(DATA_ROOT / "opencode" / "cache"))
 
         self._ctx = spawn_agent_process(
             client, self._command, *self._args, env=spawn_env, cwd=self._cwd,

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import webbrowser
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -29,7 +30,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from bridge.config import RESOURCE_ROOT
+from bridge.config import DATA_ROOT, RESOURCE_ROOT
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("WEB_PORT", "8650"))
@@ -38,6 +39,22 @@ MAX_BODY = 1 * 1024 * 1024
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 # 防 DNS rebinding / CSRF：Host 主机名白名单 + Origin/Referer 同源校验
 _ALLOWED_HOSTNAMES = {"127.0.0.1", "localhost", "[::1]", "::1"}
+
+# 运行日志（windowed 打包形态无控制台，落数据根 logs/web.log 便于排查）
+_LOG_FILE = DATA_ROOT / "logs" / "web.log"
+
+
+def _log(msg: str) -> None:
+    try:
+        _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {msg}\n")
+    except Exception:
+        pass
+    try:
+        print(msg)
+    except Exception:
+        pass
 
 
 def _origin_ok(header: str) -> bool:
@@ -56,12 +73,16 @@ def _origin_ok(header: str) -> bool:
 # ---------- 长任务 ----------
 
 class Job:
-    """一个长任务：依次执行命令，日志入环形缓冲，增量轮询。"""
+    """一个长任务：依次执行命令（可带阶段标注），日志入环形缓冲，增量轮询。
 
-    def __init__(self, name: str, commands: list[list[str]], on_done=None):
+    steps 元素：list[list[str]] 兼容旧式命令；dict = {"stage": 阶段文案, "cmd": [...]}
+    """
+
+    def __init__(self, name: str, steps: list, on_done=None):
         self.name = name
-        self.commands = commands
+        self.steps = steps
         self.on_done = on_done
+        self.stage = ""
         self.lines: list[str] = []
         self.done = False
         self.ok = False
@@ -69,7 +90,12 @@ class Job:
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def _run(self) -> None:
-        for cmd in self.commands:
+        for st in self.steps:
+            if isinstance(st, dict):
+                self.stage = st.get("stage", "")
+                cmd = st["cmd"]
+            else:
+                cmd = st
             self.lines.append("$ " + " ".join(shlex.quote(c) for c in cmd))
             try:
                 p = subprocess.Popen(
@@ -101,7 +127,7 @@ class Job:
     def snapshot(self) -> dict:
         lines = self.lines[self.pos:]
         self.pos = len(self.lines)
-        return {"done": self.done, "ok": self.ok, "lines": lines}
+        return {"done": self.done, "ok": self.ok, "stage": self.stage, "lines": lines}
 
 
 class WizardApp:
@@ -144,6 +170,7 @@ ROUTES = {
     ("POST", "/api/opencode/install"): _h("opencode_setup", "install"),
     ("GET", "/api/opencode/status"): _h("opencode_setup", "status"),
     ("POST", "/api/assemble"): _h("assemble", "handle"),
+    ("POST", "/api/assemble/detect"): _h("assemble", "detect"),
     ("GET", "/api/assemble/status"): _h("assemble", "status"),
     ("POST", "/api/config/gen"): _h("config_gen", "handle"),
     ("POST", "/api/login/setup"): _h("login", "setup"),
@@ -354,7 +381,7 @@ def _maybe_autostart_opencode(app: WizardApp) -> None:
     cmds = opencode_setup.build_install_commands()
     if cmds:
         app.start_job("opencode_install", cmds, on_done=lambda ok: opencode_setup.install_done(app, ok))
-        print("[wizard] opencode 未安装，已在后台启动自动安装（web 界面可看进度）")
+        _log("[wizard] opencode 未安装，已在后台启动自动安装（web 界面可看进度）")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -371,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
         except SystemExit:
             raise  # 未登录等语义：非零退出码透传（服务管理器可见）
         except Exception as e:  # noqa: BLE001
-            print(f"[wizard] bridge 启动失败: {e}")
+            _log(f"[wizard] bridge 启动失败: {e}")
             return 1
         return 0
     port = PORT
@@ -381,17 +408,17 @@ def main(argv: list[str] | None = None) -> int:
 
     httpd = ThreadingHTTPServer((HOST, port), Handler)
     url = f"http://{HOST}:{port}/"
-    print(f"[wizard] 服务已启动: {url}")
+    _log(f"[wizard] 服务已启动: {url}")
     if not SELFTEST:
         try:
             webbrowser.open(url)
         except Exception:  # noqa: BLE001
-            print(f"[wizard] 请手动打开浏览器访问 {url}")
+            _log(f"[wizard] 请手动打开浏览器访问 {url}")
         _maybe_autostart_opencode(APP)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\n[wizard] 已停止")
+        _log("[wizard] 已停止")
     return 0
 
 

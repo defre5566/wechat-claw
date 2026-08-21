@@ -11,9 +11,11 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+from datetime import datetime
 
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 
@@ -23,6 +25,11 @@ _DOC_URL = "https://opencode.ai/docs/install"
 _POSIX_CMD = "curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path"
 # Windows：官方 release zip（x64），下载解压即可，无管道执行远程脚本
 _WIN_ZIP_URL = "https://github.com/anomalyco/opencode/releases/latest/download/opencode-windows-x64.zip"
+
+# 向导安装标记：存在 = opencode 由 wechat-claw 安装（XDG 数据收敛到数据根、卸载时一并删除）
+from bridge.config import DATA_ROOT  # noqa: E402
+
+_INSTALL_MARKER = DATA_ROOT / ".config" / "opencode-installed.json"
 
 
 def _bin_name() -> str:
@@ -51,8 +58,8 @@ def detect_installed() -> dict | None:
     return None
 
 
-def build_install_commands() -> list[list[str]]:
-    """分平台安装命令（作为长任务 Job 依次执行）。"""
+def build_install_commands() -> list[dict]:
+    """分平台安装命令（作为长任务 Job 依次执行，带阶段标注）。"""
     if os.name == "nt":
         # PowerShell：下载官方 release zip → 解压到安装目录 → 归一化 opencode.exe → 清理
         install_dir = _INSTALL_DIR.replace("'", "''")
@@ -68,14 +75,30 @@ def build_install_commands() -> list[list[str]]:
             "if ($exe) { Copy-Item -Force $exe.FullName (Join-Path $dir 'opencode.exe') };"
             "Remove-Item -Force $tmp"
         )
-        return [["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]]
-    return [["bash", "-c", f"set -o pipefail; {_POSIX_CMD}"]]
+        return [{"stage": "下载并安装 opencode（官方 release zip）",
+                 "cmd": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]}]
+    return [{"stage": "下载并安装 opencode（官方脚本）",
+             "cmd": ["bash", "-c", f"set -o pipefail; {_POSIX_CMD}"]}]
 
 
 def install_done(app, ok: bool) -> None:
-    """安装 Job 完成回调：成功 → 标记步骤完成。"""
-    if ok:
-        app.steps["opencode"] = True
+    """安装 Job 完成回调：成功 → 标记步骤完成 + 写向导安装标记（收敛隔离/卸载删除依据）。"""
+    if not ok:
+        return
+    app.steps["opencode"] = True
+    try:
+        _INSTALL_MARKER.parent.mkdir(parents=True, exist_ok=True)
+        d = detect_installed()
+        _INSTALL_MARKER.write_text(
+            json.dumps({
+                "version": d["version"] if d else "",
+                "installed_at": datetime.now().isoformat(timespec="seconds"),
+                "method": "wizard",
+            }, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
 
 
 def detect(app, body: dict | None = None) -> dict:

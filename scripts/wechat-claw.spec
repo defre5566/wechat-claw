@@ -68,5 +68,5 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=False,  # windowed：无控制台弹窗（日志落数据根 logs/）
 )

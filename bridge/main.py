@@ -36,7 +36,11 @@ from .scheduler import MODULES_DIR, RUN_TIMEOUT, run_module, scheduler
 from .session import ConfirmAcpAgent, PermissionGate, SessionManager
 from .paths import classify
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+# windowed 打包形态无 stderr（sys.stderr=None），basicConfig 的 StreamHandler 会崩 → 仅控制台形态加
+if sys.stderr is not None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+else:
+    logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("wechat-bridge")
 
 # bridge 事件同时落 logs/system.log（与模块 log_event 同文件同轮转配置），stderr→journald 保留

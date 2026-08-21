@@ -1,10 +1,13 @@
 // wechat-claw 对话 agent 权限配置示例（opencode ACP 子进程加载）
-// 使用：复制为项目根 opencode.jsonc 即可直接生效（默认路径，无需修改）；
+// 使用：初始化向导「配置生成」步骤自动复制为数据根 opencode.jsonc（cwd=数据根自动加载）；
 //       不放置 = opencode 默认权限（全 ask，也能运行）。
 // 配套：与 AGENTS.md「安全红线」一致——deny 五项为硬性边界，文件发送由 bridge 三级规则兜底。
 // 注意：permission 对象按顺序匹配（后命中优先），宽规则在前、窄规则在后，勿调整顺序。
 {
   "$schema": "https://opencode.ai/config.json",
+
+  // 默认免费模型（零 API key 开箱即用）；自定义模型可改为 "provider/model" 形式
+  "model": "opencode/mimo-v2-5-free",
 
   "permission": {
     // 项目外目录访问：默认放开家目录（读个人文档/发送文件需要）；可收窄为具体目录，如 "~/文档/**": "allow"
@@ -16,7 +19,7 @@
     "read": {
       "**": "allow",
       "modules/**/token": "deny",
-      "agent-SDK/push_token": "deny",
+      "agent-SDK/**": "deny",
       "modules/**/anniversaries.json.enc": "deny",
       ".config/crypto.key": "deny",
       ".config/admin.password": "deny",

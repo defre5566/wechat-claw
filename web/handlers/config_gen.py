@@ -1,4 +1,4 @@
-"""④ 配置生成：config.yaml（DEFAULTS_USER 序列化）+ crypto.key + 管理密码。"""
+"""④ 配置生成：config.yaml（DEFAULTS_USER 序列化）+ crypto.key + 管理密码 + opencode.jsonc。"""
 from __future__ import annotations
 
 import json
@@ -6,10 +6,12 @@ import os
 
 import yaml
 
-from bridge.config import CONFIG_FILE, DEFAULTS_USER
+from bridge.config import CONFIG_FILE, DEFAULTS_USER, DATA_ROOT, RESOURCE_ROOT
 from modules.common import crypto as crypto_mod
 from web import auth
 from web.handlers.opencode_setup import detect_installed
+
+OPCODE_CONFIG = DATA_ROOT / "opencode.jsonc"
 
 
 def _gen_config() -> dict:
@@ -41,9 +43,29 @@ def _gen_key() -> dict:
         return {"ok": False, "error": str(e)}
 
 
+def _gen_opencode_config() -> dict:
+    """数据根 opencode.jsonc：权限模板 + 默认免费模型（已存在不覆盖）。
+
+    ACP 子进程 cwd=数据根，自动加载 ./opencode.jsonc；不写全局 opencode 配置，
+    避免覆盖用户原有配置。
+    """
+    if OPCODE_CONFIG.is_file():
+        return {"ok": True, "file": str(OPCODE_CONFIG), "created": False}
+    tpl = RESOURCE_ROOT / "opencode.jsonc.example"
+    if not tpl.is_file():
+        return {"ok": False, "error": "模板缺失"}
+    try:
+        OPCODE_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        OPCODE_CONFIG.write_text(tpl.read_text(encoding="utf-8"), encoding="utf-8")
+        return {"ok": True, "file": str(OPCODE_CONFIG), "created": True}
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+
+
 def handle(app, body: dict | None = None) -> dict:
     body = body or {}
-    results = {"config": _gen_config(), "key": _gen_key()}
+    results = {"config": _gen_config(), "key": _gen_key(),
+               "opencode": _gen_opencode_config()}
 
     # 管理密码：首次必填（开放期仅限向导完成前；已存在则可跳过）
     password = body.get("password", "")

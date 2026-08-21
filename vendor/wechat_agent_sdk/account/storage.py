@@ -5,12 +5,16 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
+import os
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_STATE_DIR = Path.home() / ".wechat-agent-sdk"
+# wechat-claw 补丁：支持 WECHAT_AGENT_SDK_STATE_DIR 环境变量重定向存储目录
+# （默认 ~/.wechat-agent-sdk，部署时由 bridge.config 收敛到数据根）
+DEFAULT_STATE_DIR = Path(os.environ.get("WECHAT_AGENT_SDK_STATE_DIR")
+                            or (Path.home() / ".wechat-agent-sdk"))
 
 
 class AccountStorage(ABC):

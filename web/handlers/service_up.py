@@ -312,23 +312,38 @@ def _win_app_entries() -> list[dict]:
     steps += _exec_commands([["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
                               "-Command", lnk_cmd]])
 
-    # 4) HKCU 卸载注册项（设置→应用可见；卸载脚本在数据根之外，可整删数据根）
-    uninstall_content = f"""@echo off
+    # 4) HKCU 卸载注册项 + 数据根内卸载脚本（收敛：脚本与数据同目录，自删式清理）
+    # 注意：不用 f-string 三引号——bat 里的 ""%~f0"" 会产生 """ 序列提前结束字符串
+    uninstall_bat = base / "uninstall.bat"
+    uninstall_content = (
+        """@echo off
+chcp 65001 >nul
 rem wechat-claw 卸载脚本（初始化向导生成）
 setlocal
-set NSSM=%~dp0wechat-claw\\nssm.exe
+set NSSM=%~dp0nssm.exe
 "%NSSM%" stop wechat-bridge >nul 2>&1
 "%NSSM%" remove wechat-bridge confirm >nul 2>&1
 reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\wechat-claw" /f >nul 2>&1
 del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\wechat-claw\\wechat-claw Web 管理.lnk" /f >nul 2>&1
 rmdir "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\wechat-claw" >nul 2>&1
-rmdir /s /q "%LOCALAPPDATA%\\wechat-claw" >nul 2>&1
+if exist "%~dp0.config\\opencode-installed.json" (
+  echo [1/4] opencode 由 wechat-claw 安装：正在一并删除（~\\.opencode\\bin）...
+  rmdir /s /q "%USERPROFILE%\\.opencode" >nul 2>&1
+) else (
+  echo [1/4] 未删除 opencode：它可能由其他程序安装，如需删除请手动处理
+)
+echo [2/4] 服务 wechat-bridge 已移除
+echo [3/4] 卸载注册项与快捷方式已移除
+echo [4/4] 数据目录将在 2 秒后自动删除...
 echo.
-echo wechat-claw 已卸载：服务、注册项、快捷方式、数据目录均已移除。
-echo 程序本体请手动删除：{DEPLOY_ROOT}
+echo wechat-claw 已卸载。
+echo 程序本体请手动删除：__DEPLOY_ROOT__
 echo 微信登录凭证（如需彻底清除）：%USERPROFILE%\\.wechat-agent-sdk\\accounts.json
-pause
 """
+        # bat 里的 ""%~dp0"" 转义会形成 """ 序列，不能用三引号字符串承载 → 单引号行拼接
+        'start "" /b cmd /c "timeout /t 2 /nobreak >nul & rmdir /s /q ""%~dp0"" & del ""%~f0"""\n'
+        "exit /b 0\n"
+    ).replace("__DEPLOY_ROOT__", str(DEPLOY_ROOT))
     steps += _write_file(uninstall_bat, uninstall_content)
 
     key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\wechat-claw"

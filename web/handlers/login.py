@@ -53,15 +53,17 @@ def status(app, body: dict | None = None) -> dict:
         state = "pending" if _MOCK_COUNT <= 2 else "confirmed"
         if state == "confirmed":
             app.steps["login"] = True
-        return {"ok": True, "status": state}
+        return {"ok": True, "status": state, "done": state == "confirmed"}
     transport = _get_transport(app)
     session = app.login.get("session")
     if app.login.get("already"):
-        return {"ok": True, "status": "confirmed", "already": True}
+        app.steps["login"] = True
+        return {"ok": True, "status": "confirmed", "already": True, "done": True}
     if session is None:
         return {"ok": True, "status": "pending"}
     result = asyncio.run(transport.check_login(session))
     state = result.status.value  # pending/scanned/confirmed/expired/error
     if state == "confirmed":
         app.steps["login"] = True
-    return {"ok": True, "status": state, "error": result.error}
+    # done 字段：前端 api.poll 以 data.done 判断结束（缺了会导致扫码成功后轮询不停）
+    return {"ok": True, "status": state, "error": result.error, "done": state == "confirmed"}

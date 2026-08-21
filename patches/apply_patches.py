@@ -79,6 +79,28 @@ PATCHES = [
         "self._file.chmod(0o600)",
         "⑤ storage.py accounts.json chmod 0600",
     ),
+    (
+        STORAGE,
+        "from pathlib import Path",
+        (
+            "import os\n"
+            "from pathlib import Path"
+        ),
+        "import os",
+        "⑥ storage.py import os（⑦ 依赖）",
+    ),
+    (
+        STORAGE,
+        'DEFAULT_STATE_DIR = Path.home() / ".wechat-agent-sdk"',
+        (
+            "# wechat-claw 补丁：支持 WECHAT_AGENT_SDK_STATE_DIR 环境变量重定向存储目录\n"
+            "# （默认 ~/.wechat-agent-sdk，部署时由 bridge.config 收敛到数据根）\n"
+            'DEFAULT_STATE_DIR = Path(os.environ.get("WECHAT_AGENT_SDK_STATE_DIR")\n'
+            '                            or (Path.home() / ".wechat-agent-sdk"))'
+        ),
+        'os.environ.get("WECHAT_AGENT_SDK_STATE_DIR")',
+        "⑦ storage.py 存储目录可经环境变量重定向",
+    ),
 ]
 
 
