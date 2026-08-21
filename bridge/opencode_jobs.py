@@ -218,7 +218,7 @@ def install_job(module: str, name: str, schedule: str, prompt: str,
         f"StandardOutput=append:{log_path}\n"
         f"StandardError=append:{log_path}\n"
         "[Install]\n"
-        "WantedBy=default.target\n",
+        "WantedBy=default.target\n"
     )
     timer_text = (
         "[Unit]\n"

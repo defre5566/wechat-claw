@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -46,71 +47,65 @@ def _cron_minus(cron: str, offset_min: int) -> str | None:
         return None
 
 
-def _apply_placeholders(text: str, ctx: dict) -> str:
-    """替换 prompt 占位符：{date}/{word_limit}/{categories}；缺省兜底不报错。
+# 通用占位符正则：模板可引用模块设置任意键（如 {settings:briefing_topics}）
+_SETTINGS_PLACEHOLDER = re.compile(r"\{settings:([A-Za-z_][A-Za-z0-9_]*)\}")
 
-    {output_path} 不在此替换（render_job 层按模块数据区 output_dir 注入）。
+
+def _apply_placeholders(text: str, ctx: dict, settings: dict) -> str:
+    """替换通用占位符：{date}/{module_data}/{output_path}/{settings:<key>}/{custom_prompts}。
+
+    缺键兜底（置空不报错）；custom_prompts 段由调用方放入 ctx。
     """
-    return (text
-            .replace("{date}", str(ctx.get("date") or ""))
-            .replace("{word_limit}", str(ctx.get("word_limit") or 1000))
-            .replace("{categories}", str(ctx.get("categories") or "")))
+    out = (text
+           .replace("{date}", str(ctx.get("date") or ""))
+           .replace("{module_data}", str(ctx.get("module_data") or ""))
+           .replace("{output_path}", str(ctx.get("output_path") or ""))
+           .replace("{custom_prompts}", str(ctx.get("custom_prompts") or "").strip(" \n")))
+
+    def _sub(match: re.Match) -> str:
+        key = match.group(1)
+        val = settings.get(key)
+        if isinstance(val, list):
+            return "、".join(str(x) for x in val)
+        return str(val) if val is not None else ""
+
+    return _SETTINGS_PLACEHOLDER.sub(_sub, out)
 
 
-def _compose_prompt(mod_dir: Path, data_dir: Path, settings: dict, template: dict) -> str:
-    """合成 job prompt：基底（预设 decrypt + 占位符替换）→ 所选方向参数 → 用户自定义 prompt。
+def _load_custom_prompts(data_dir: Path) -> str:
+    """用户自定义方向 prompt（web 导入，模块数据区 prompts/custom/*.json）→ 文本段。
 
-    占位符上下文：word_limit = 所选方向 word_limit 之和（默认 1000）；
-    categories = 有分类的方向分行拼接（如时政四分类）。
+    通用用户数据机制（任何模块可用）；无自定义返回空。
     """
-    topics = settings.get("briefing_topics") or []
-    if not isinstance(topics, list):
-        topics = []
-    directions = load_json(mod_dir / "directions.json") or {}
-    selected = {t: directions[t] for t in topics if isinstance(directions.get(t), dict)}
+    custom_dir = data_dir / "prompts" / "custom"
+    if not custom_dir.is_dir():
+        return ""
+    parts: list[str] = []
+    for f in sorted(custom_dir.glob("*.json")):
+        c = load_json(f)
+        if isinstance(c, dict) and c.get("prompt"):
+            parts.append(f"[用户自定义方向 {f.stem}]\n{c['prompt']}")
+    return "\n\n".join(parts)
 
-    # 占位符上下文
-    word_limit = sum(int(d.get("word_limit") or 0) for d in selected.values()) or 1000
-    cat_lines = [f"{t}：{'/'.join(map(str, d.get('categories') or []))}"
-                 for t, d in selected.items() if d.get("categories")]
+
+def _compose_prompt(mod_dir: Path, data_dir: Path, settings: dict, template: dict,
+                    output_path: str | None = None) -> str | None:
+    """合成 job prompt（通用模板合成，不含任何模块业务知识）。
+
+    指示语唯一来源 = job.template.json 的 `prompt` 字段（模块作者必须写清任务指示）；
+    支持通用占位符 {date}/{module_data}/{output_path}/{settings:<键>}/{custom_prompts}。
+    缺 prompt 返回 None（render_job 层拒绝登记，无备胎）。
+    """
+    tpl_prompt = template.get("prompt")
+    if not tpl_prompt or not str(tpl_prompt).strip():
+        return None
     ctx = {
         "date": date.today().isoformat(),
-        "word_limit": word_limit,
-        "categories": "\n".join(cat_lines),
+        "module_data": str(data_dir),
+        "output_path": str(output_path or ""),
+        "custom_prompts": _load_custom_prompts(data_dir),
     }
-
-    parts: list[str] = []
-
-    # 1. 基底（预设 prompts/*.enc，crypto 解密）+ 占位符替换
-    prompts_dir = mod_dir / "prompts"
-    base_enc = prompts_dir / "base.prompt.enc"
-    if base_enc.is_file():
-        try:
-            from modules.common.crypto import decrypt
-            parts.append(_apply_placeholders(decrypt(base_enc.read_text(encoding="utf-8")), ctx))
-        except Exception:
-            parts.append("（基底 prompt 解密失败，按通用信息简报流程生成）")
-
-    # 2. 所选方向关键词（directions.json 预设，只读）
-    if selected:
-        kw_lines: list[str] = []
-        for t, d in selected.items():
-            kws = d.get("keywords", [])
-            if isinstance(kws, list) and kws:
-                kw_lines.append(f"- {t}：{'、'.join(map(str, kws))}")
-        if kw_lines:
-            parts.append("本次简报方向与关键词（合并执行）：\n" + "\n".join(kw_lines))
-
-    # 3. 用户自定义 prompt（custom/*.json，同方向名覆盖）
-    custom_dir = data_dir / "prompts" / "custom"
-    for t in topics:
-        cf = custom_dir / f"{t}.json"
-        if cf.is_file():
-            c = load_json(cf)
-            if isinstance(c, dict) and c.get("prompt"):
-                parts.append(f"[用户自定义方向 {t}]\n{c['prompt']}")
-
-    return "\n\n".join(parts) if parts else template.get("fallback_prompt", "")
+    return _apply_placeholders(str(tpl_prompt), ctx, settings)
 
 
 def render_job(name: str) -> dict:
@@ -141,9 +136,11 @@ def render_job(name: str) -> dict:
     if not cron:
         return {"ok": False, "error": "无法由 settings 计算触发时刻（缺 schedule_from_settings 或时刻字段）"}
 
-    prompt = _compose_prompt(mod_dir, data_dir, settings, jt)
     output_dir = data_dir / jt.get("output_dir", "briefing")
-    prompt = prompt.replace("{output_path}", str(output_dir))  # 基底输出路径占位符
+    prompt = _compose_prompt(mod_dir, data_dir, settings, jt, output_path=str(output_dir))
+    if not prompt:
+        return {"ok": False,
+                "error": "job.template.json 缺少 prompt 字段（模块作者必须写清任务指示，无备胎）"}
 
     job = {
         "name": jt.get("name", f"{name} job"),
