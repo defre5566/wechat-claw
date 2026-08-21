@@ -1,0 +1,15 @@
+# Dependabot：依赖/安全更新自动通道（分发副本锁死版本，人工周期容易忘）
+# - 每周检查一次 pip 依赖可更新版本，最多同时 3 个 PR，合并即生效（不会自动改代码）
+# - 安全补丁（GitHub Security Advisory）由 GitHub 自动开 PR，不依赖本文件
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+    ignore:
+      - dependency-name: "pytest"
+        update-types: ["version-update:semver-major"]

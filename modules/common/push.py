@@ -23,7 +23,7 @@ def load_token(module_dir: Path) -> str:
 
 
 def post_push(payload: dict, token: str) -> bool:
-    """POST /push；200 返回 True；失败重试 RETRY 次，全败 False。"""
+    """POST /push；200 返回 True；失败重试 RETRY 次，全败 False（落 WARN，不静默）。"""
     body = json.dumps(payload).encode()
     for attempt in range(RETRY):
         try:
@@ -38,4 +38,7 @@ def post_push(payload: dict, token: str) -> bool:
             pass
         if attempt < RETRY - 1:
             time.sleep(RETRY_INTERVAL)
+    from modules.common.log import log_event
+    log_event("WARN", str(payload.get("module") or "unknown"), "push_fail",
+              f"POST /push 重试 {RETRY} 次全败（{payload.get('type', '?')}）")
     return False

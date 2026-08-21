@@ -123,3 +123,17 @@ def test_fetch_single_service_checks_region(monkeypatch):
     out2 = localdata.fetch({"province": "广东", "city": "广州"}, service="typhoon")
     assert out2 == {"typhoon": {"active": False, "list": []}}
     assert calls == [1]
+
+
+def test_fetch_pollen_uses_loc_city(monkeypatch):
+    """F5.4：花粉 URL 与返回 city 由 location 驱动（不再硬编码乌兰察布）。"""
+    captured = {}
+    monkeypatch.setattr(localdata, "http_get_json", lambda url: (
+        captured.setdefault("url", url),
+        {"level": "中", "updatedAt": "2026-08-20"},
+    )[1])
+    out = localdata._fetch_pollen({"province": "内蒙古", "city": "呼和浩特"})
+    from urllib.parse import unquote
+    assert "呼和浩特" in unquote(captured["url"])
+    assert out["city"] == "呼和浩特"
+    assert localdata._fetch_pollen({"province": "内蒙古"}) is None

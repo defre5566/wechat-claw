@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 from bridge.config import MODULES_ROOT
+from modules.common.io import load_json
 
 MODULES_DIR = MODULES_ROOT
 DATA_ROOT = MODULES_DIR / "modules_data"
@@ -97,14 +98,7 @@ def _source_local_dir(src: dict) -> Path | None:
 
 
 def _read_manifest(mod_root: Path) -> dict | None:
-    mj = mod_root / "manifest.json"
-    if not mj.is_file():
-        return None
-    try:
-        data = json.loads(mj.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else None
-    except Exception:
-        return None
+    return load_json(mod_root / "manifest.json")
 
 
 def _list_modules_from_manifest(manifest: dict) -> list[dict]:

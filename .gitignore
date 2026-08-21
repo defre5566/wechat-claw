@@ -18,12 +18,10 @@ agent-SDK/scheduler_state.json
 agent-SDK/retry_queue.json
 .session_state.json
 modules/*/*_sent.json
-modules/emotion/weather_last.json
 
 # 敏感文件（token / 密钥）
 modules/**/token
 agent-SDK/push_token
-modules/emotion/anniversaries.json.enc
 # 共享缓存（运行产物）
 modules/common/shared/*.json
 

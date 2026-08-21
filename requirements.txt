@@ -1,4 +1,5 @@
-# wechat-agent-sdk 由 vendor/wechat_agent_sdk 提供（0.2.1 全量快照，4 处补丁预打）：
+# wechat-agent-sdk 由 vendor/wechat_agent_sdk 提供（0.2.1 全量快照，10 组补丁预打，
+#   清单见 patches/apply_patches.py；上游版本号与补丁记录见 vendor/wechat_agent_sdk/_VENDOR.md）：
 #   pip install -e ./vendor/wechat_agent_sdk
 # 下方为 SDK 运行时依赖（版本锁死，与 PyPI 版 SDK 一致）
 agent-client-protocol==0.12.0
@@ -21,5 +22,5 @@ typing_extensions==4.16.0
 # 测试（dev 依赖）
 pytest==9.1.1
 
-# 配置化（common/config.py 读 YAML）
+# 配置化（bridge/config.py 读 YAML，用户段可配）
 PyYAML==6.0.2

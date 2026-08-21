@@ -18,6 +18,7 @@ from datetime import date
 from pathlib import Path
 
 from bridge.config import MODULES_ROOT
+from modules.common.io import load_json, time_to_cron
 
 MODULES_DIR = MODULES_ROOT
 DATA_ROOT = MODULES_DIR / "modules_data"
@@ -30,14 +31,6 @@ if os.environ.get("OPENCODE_PERMS_ROOT"):
 
 def module_data_dir(name: str) -> Path:
     return DATA_ROOT / name
-
-
-def _load_json(path: Path) -> dict | None:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else None
-    except Exception:
-        return None
 
 
 def _cron_minus(cron: str, offset_min: int) -> str | None:
@@ -73,7 +66,7 @@ def _compose_prompt(mod_dir: Path, data_dir: Path, settings: dict, template: dic
     topics = settings.get("briefing_topics") or []
     if not isinstance(topics, list):
         topics = []
-    directions = _load_json(mod_dir / "directions.json") or {}
+    directions = load_json(mod_dir / "directions.json") or {}
     selected = {t: directions[t] for t in topics if isinstance(directions.get(t), dict)}
 
     # 占位符上下文
@@ -113,7 +106,7 @@ def _compose_prompt(mod_dir: Path, data_dir: Path, settings: dict, template: dic
     for t in topics:
         cf = custom_dir / f"{t}.json"
         if cf.is_file():
-            c = _load_json(cf)
+            c = load_json(cf)
             if isinstance(c, dict) and c.get("prompt"):
                 parts.append(f"[用户自定义方向 {t}]\n{c['prompt']}")
 
@@ -124,16 +117,16 @@ def render_job(name: str) -> dict:
     """渲染模块 job（存在声明时）：{ok, job?, error?, systemd?}。"""
     mod_dir = MODULES_DIR / name
     data_dir = module_data_dir(name)
-    mj = _load_json(mod_dir / "module.json") or {}
+    mj = load_json(mod_dir / "module.json") or {}
     job_file = mj.get("job_template")
     if isinstance(job_file, str):
-        jt = _load_json(mod_dir / job_file)          # 字符串声明 = 相对模块目录
+        jt = load_json(mod_dir / job_file)          # 字符串声明 = 相对模块目录
     else:
-        jt = _load_json(job_file or (mod_dir / "job.template.json"))
+        jt = load_json(job_file or (mod_dir / "job.template.json"))
     if not jt:
         return {"ok": False, "error": "模块无 job.template.json 声明（非 agent 型模块）"}
 
-    settings = _load_json(data_dir / "settings.json") or {}
+    settings = load_json(data_dir / "settings.json") or {}
     sfs = mj.get("schedule_from_settings") or []
 
     # 触发时刻：对应 phase 的时刻 - offset_min
@@ -141,7 +134,7 @@ def render_job(name: str) -> dict:
     for item in sfs:
         if isinstance(item, dict) and item.get("phase") == jt.get("phase"):
             tf = str(item.get("time_field", ""))
-            c = _time_to_cron(settings.get(tf))
+            c = time_to_cron(settings.get(tf))
             if c:
                 cron = _cron_minus(c, int(jt.get("offset_min", 0)))
             break
@@ -172,19 +165,6 @@ def render_job(name: str) -> dict:
 
     systemd = _systemd_units(name, job)
     return {"ok": True, "job": job, "job_file": str(job_path), "systemd": systemd}
-
-
-def _time_to_cron(t) -> str | None:
-    if not isinstance(t, str):
-        return None
-    try:
-        hh, mm = t.strip().split(":")
-        h, m = int(hh), int(mm)
-        if not (0 <= h < 24 and 0 <= m < 60):
-            return None
-        return f"{m} {h} * * *"
-    except Exception:
-        return None
 
 
 def _systemd_units(name: str, job: dict) -> dict:
@@ -261,16 +241,16 @@ def sync_module_jobs(name: str) -> dict:
     - 否则 → 渲染 + 自动登记（sync_jobs）
     """
     mod_dir = MODULES_DIR / name
-    mj = _load_json(mod_dir / "module.json") or {}
+    mj = load_json(mod_dir / "module.json") or {}
     jt_ref = mj.get("job_template")
     if not jt_ref:
         return {"ok": True, "skipped": True}
     if isinstance(jt_ref, str):
-        jt = _load_json(mod_dir / jt_ref) or {}     # 字符串声明 = 相对模块目录
+        jt = load_json(mod_dir / jt_ref) or {}     # 字符串声明 = 相对模块目录
     else:
-        jt = _load_json(jt_ref) or {}
+        jt = load_json(jt_ref) or {}
     phase = str(jt.get("phase", ""))
-    settings = _load_json(module_data_dir(name) / "settings.json") or {}
+    settings = load_json(module_data_dir(name) / "settings.json") or {}
     for item in mj.get("schedule_from_settings") or []:
         if isinstance(item, dict) and item.get("phase") == phase:
             ef = item.get("enabled_field")

@@ -15,6 +15,7 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -72,6 +73,11 @@ def _origin_ok(header: str) -> bool:
 
 # ---------- 长任务 ----------
 
+# 长任务资源保护：日志环形截断（保留最近 N 行）+ 单步超时 watchdog（卡死命令自动 kill）
+JOB_LINES_LIMIT = 2000
+JOB_TIMEOUT_SECONDS = 600
+
+
 class Job:
     """一个长任务：依次执行命令（可带阶段标注），日志入环形缓冲，增量轮询。
 
@@ -87,7 +93,19 @@ class Job:
         self.done = False
         self.ok = False
         self.pos = 0
+        self._lock = threading.Lock()
+        self._trunc_note: str | None = None
         self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def _add_line(self, text: str) -> None:
+        with self._lock:
+            self.lines.append(text)
+            if len(self.lines) > JOB_LINES_LIMIT:
+                dropped = len(self.lines) - JOB_LINES_LIMIT
+                del self.lines[:dropped]
+                self.pos = max(0, self.pos - dropped)
+                if self._trunc_note is None:
+                    self._trunc_note = f"[job] 日志过长已截断（保留最近 {JOB_LINES_LIMIT} 行）"
 
     def _run(self) -> None:
         for st in self.steps:
@@ -96,21 +114,39 @@ class Job:
                 cmd = st["cmd"]
             else:
                 cmd = st
-            self.lines.append("$ " + " ".join(shlex.quote(c) for c in cmd))
+            self._add_line("$ " + " ".join(shlex.quote(c) for c in cmd))
             try:
                 p = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, encoding="utf-8", errors="replace",
                 )
                 assert p.stdout is not None
-                for line in p.stdout:
-                    self.lines.append(line.rstrip())
+                # 读线程泵日志（Windows 无 select-pipe，跨平台统一线程方案）
+                pump_out = []
+
+                def _pump():
+                    for line in p.stdout:
+                        pump_out.append(line.rstrip())
+
+                pump = threading.Thread(target=_pump, daemon=True)
+                pump.start()
+                # watchdog：单步超时强制 kill（防 curl 挂起永久占单槽）
+                deadline = time.monotonic() + JOB_TIMEOUT_SECONDS
+                while p.poll() is None:
+                    if time.monotonic() > deadline:
+                        p.kill()
+                        self._add_line(f"[job] 单步超时 {JOB_TIMEOUT_SECONDS}s，已强制终止")
+                        break
+                    time.sleep(0.5)
                 rc = p.wait()
+                pump.join(timeout=2)
+                for line in pump_out:
+                    self._add_line(line)
             except Exception as e:  # noqa: BLE001
                 rc = 1
-                self.lines.append(f"[job] {e}")
+                self._add_line(f"[job] {e}")
             if rc != 0:
-                self.lines.append(f"[job] 失败 rc={rc}")
+                self._add_line(f"[job] 失败 rc={rc}")
                 self.done = True
                 self.ok = False
                 if self.on_done:
@@ -125,9 +161,14 @@ class Job:
         self.thread.start()
 
     def snapshot(self) -> dict:
-        lines = self.lines[self.pos:]
-        self.pos = len(self.lines)
-        return {"done": self.done, "ok": self.ok, "stage": self.stage, "lines": lines}
+        with self._lock:
+            lines = self.lines[self.pos:]
+            self.pos = len(self.lines)
+            note = self._trunc_note
+            if note:
+                self._trunc_note = None
+                lines = [note, *lines]
+            return {"done": self.done, "ok": self.ok, "stage": self.stage, "lines": lines}
 
 
 class WizardApp:

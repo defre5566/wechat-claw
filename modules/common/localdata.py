@@ -85,8 +85,12 @@ POLLEN_LEVEL_TAG = {
 
 
 def _fetch_pollen(loc: dict) -> dict | None:
+    """花粉浓度：location 驱动（URL 与返回 city 均取 loc.city，不再硬编码乌兰察布）。"""
+    city = (loc or {}).get("city") or ""
+    if not city:
+        return None
     d = date.today().isoformat()
-    url = f"{POLLEN_API}?city={urllib.parse.quote('乌兰察布')}&date={d}"
+    url = f"{POLLEN_API}?city={urllib.parse.quote(city)}&date={d}"
     data = http_get_json(url)
     if not data or not data.get("level"):
         return None
@@ -95,7 +99,7 @@ def _fetch_pollen(loc: dict) -> dict | None:
         "level": level,
         "detail": POLLEN_LEVEL_TAG.get(level, ""),
         "updated_at": data.get("updatedAt", ""),
-        "city": "乌兰察布",
+        "city": city,
     }
 
 

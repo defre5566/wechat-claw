@@ -3,8 +3,8 @@ name = "wechat-claw"
 version = "0.1.2"
 description = "微信主动推送体系：iLink 直连 + opencode 对话 agent（微信可主动关心、可干活）"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11"  # CI/构建统一 3.12（测试与打包同 minor）；本地开发 3.14 可跑但以 CI 为准
 license = { text = "MIT" }
 
-# 依赖不在此声明：统一走 requirements.txt，防止双源维护。
-# 本仓库不提供 pip 安装（部署 = venv + 源码运行 bridge.main）；无 build-system。
+# 依赖唯一真源 = requirements.txt（版本锁死；本仓库不提供 pip 安装，
+# 部署 = venv + 源码运行 bridge.main），此处不重复声明防双源漂移；无 build-system。

@@ -17,20 +17,20 @@ from modules import register
 # ---------- _time_to_cron ----------
 
 def test_time_to_cron_valid():
-    assert register._time_to_cron("08:30") == "30 8 * * *"
-    assert register._time_to_cron("21:00") == "0 21 * * *"
-    assert register._time_to_cron("00:05") == "5 0 * * *"
-    assert register._time_to_cron(" 08:30 ") == "30 8 * * *"
+    assert register.time_to_cron("08:30") == "30 8 * * *"
+    assert register.time_to_cron("21:00") == "0 21 * * *"
+    assert register.time_to_cron("00:05") == "5 0 * * *"
+    assert register.time_to_cron(" 08:30 ") == "30 8 * * *"
 
 
 def test_time_to_cron_invalid():
-    assert register._time_to_cron(None) is None
-    assert register._time_to_cron("") is None
-    assert register._time_to_cron("8:30") == "30 8 * * *"   # 一位小时宽松接受
-    assert register._time_to_cron("25:00") is None
-    assert register._time_to_cron("08:60") is None
-    assert register._time_to_cron("abc") is None
-    assert register._time_to_cron(830) is None
+    assert register.time_to_cron(None) is None
+    assert register.time_to_cron("") is None
+    assert register.time_to_cron("8:30") == "30 8 * * *"   # 一位小时宽松接受
+    assert register.time_to_cron("25:00") is None
+    assert register.time_to_cron("08:60") is None
+    assert register.time_to_cron("abc") is None
+    assert register.time_to_cron(830) is None
 
 
 # ---------- _sync_schedule_from_settings ----------

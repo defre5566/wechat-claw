@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from bridge.config import MODULES_ROOT, WORK_ROOT
+from modules.common.io import load_json
 
 MODULES_DIR = MODULES_ROOT
 DATA_ROOT = MODULES_DIR / "modules_data"
@@ -36,14 +37,6 @@ def module_data_dir(name: str) -> Path:
     """模块用户数据目录 modules/modules_data/<name>/。"""
     data_root, _ = _paths()
     return data_root / name
-
-
-def _load_json(path: Path) -> dict | None:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else None
-    except Exception:
-        return None
 
 
 def _resolve(p: str) -> str:
@@ -87,7 +80,7 @@ def collect_permissions() -> dict:
         if not mj.is_file():
             continue
         name = mod_dir.name
-        data = _load_json(mj) or {}
+        data = load_json(mj) or {}
 
         # 1. 模块自声明越界豁免
         declared = data.get("permissions") or {}
@@ -99,7 +92,7 @@ def collect_permissions() -> dict:
                         perms[op][rp] = "allow"
 
         # 2. 设置 path 字段自动豁免
-        settings = _load_json(module_data_dir(name) / "settings.json") or {}
+        settings = load_json(module_data_dir(name) / "settings.json") or {}
         for key in _path_fields(data):
             val = settings.get(key)
             if isinstance(val, str) and val.strip():

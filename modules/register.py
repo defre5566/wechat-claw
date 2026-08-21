@@ -1,7 +1,9 @@
 """模块管理器（唯一入口）：注册/更新/启停/列表/卸载。
 
 - 函数库形态：web 后端 import 调用；CLI 形态：python3 modules/register.py ...
-- module.json 是唯一落盘（enabled/调度/retry/token 均在此）；build_index 实时扫描
+- 部署状态（enabled/retry/auto_update）与业务设置统一落数据区 settings.json
+  （module.json 只留声明与调度产物；旧版 docstring 的"唯一落盘"表述已过时）
+- build_index 实时扫描 module.json + settings.json 判定 enabled
 - enabled 语义：缺失或 false = 关闭（不调度、不推送、不进 index）；显式 true = 启用；
   新注册默认写 false（手动启用后才运行）
 
@@ -26,6 +28,7 @@ if str(MODULES_DIR.parent) not in sys.path:
     sys.path.insert(0, str(MODULES_DIR.parent))
 
 from bridge.config import MODULES_ROOT  # noqa: E402  （sys.path 就绪后导入）
+from modules.common.io import load_json, time_to_cron  # noqa: E402
 
 MODULES_DIR = MODULES_ROOT
 DATA_ROOT = MODULES_DIR / "modules_data"  # 模块用户数据根（代码/数据分家）
@@ -39,28 +42,12 @@ def module_data_dir(name: str) -> Path:
 # ---------- 内部 IO ----------
 
 def _load_module_json(name: str) -> dict:
-    mj = MODULES_DIR / name / "module.json"
-    if mj.is_file():
-        try:
-            data = json.loads(mj.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
-    return {}
+    return load_json(MODULES_DIR / name / "module.json", {})
 
 
 def _load_settings_json(name: str) -> dict:
     """读数据区 settings.json（用户配置值；不存在返回 {}）。"""
-    sf = module_data_dir(name) / "settings.json"
-    if sf.is_file():
-        try:
-            data = json.loads(sf.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
-    return {}
+    return load_json(module_data_dir(name) / "settings.json", {})
 
 
 def _save_settings_json(name: str, settings: dict) -> bool:
@@ -162,20 +149,6 @@ def set_auto_update(name: str, on: bool) -> bool:
 
 # ---------- schedule_from_settings 联动（设置时间字段 → 调度 cron） ----------
 
-def _time_to_cron(t) -> str | None:
-    """'HH:MM' → cron 'MM HH * * *'；非法返回 None。"""
-    if not isinstance(t, str):
-        return None
-    try:
-        hh, mm = t.strip().split(":")
-        h, m = int(hh), int(mm)
-        if not (0 <= h < 24 and 0 <= m < 60):
-            return None
-        return f"{m} {h} * * *"
-    except Exception:
-        return None
-
-
 def _sync_schedule_from_settings(name: str) -> None:
     """schedule_from_settings 联动：按设置时间字段生成 cron 写回 module.json schedule。
 
@@ -197,7 +170,7 @@ def _sync_schedule_from_settings(name: str) -> None:
         ef = item.get("enabled_field")
         if ef and settings.get(ef) is False:
             continue
-        cron = _time_to_cron(settings.get(tf))
+        cron = time_to_cron(settings.get(tf))
         if not cron:
             continue
         entry: dict = {"id": phase or tf, "cron": cron}
