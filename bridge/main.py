@@ -42,7 +42,7 @@ log = logging.getLogger("wechat-bridge")
 # bridge 事件同时落 logs/system.log（与模块 log_event 同文件同轮转配置），stderr→journald 保留
 from logging.handlers import RotatingFileHandler  # noqa: E402
 
-_LOG_FILE = WORKDIR / "logs" / "system.log"
+_LOG_FILE = WORK_ROOT / "logs" / "system.log"
 
 
 def _setup_file_logging() -> None:
@@ -56,7 +56,7 @@ def _setup_file_logging() -> None:
 
 _setup_file_logging()
 
-INBOX_DIR = WORKDIR / "inbox"
+INBOX_DIR = WORK_ROOT / "inbox"
 MAX_SEND_FILE = 50 * 1024 * 1024  # _send_file 单文件上限 50MB（防超大文件 OOM）
 
 

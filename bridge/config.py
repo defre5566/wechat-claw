@@ -1,10 +1,10 @@
-"""config：基础设施配置层（读 <项目根>/.config/config.yaml）。
+"""config：基础设施配置层（读 <数据根>/.config/config.yaml）。
 
 - 运行参数（push/session/scheduler/log）= bridge 内置默认，**配置文件不可覆盖**
 - 用户参数（acp/file_send/crypto）可经 config.yaml 覆盖（深合并生效）
 - 优先级：config.yaml（用户段）> DEFAULTS_USER > DEFAULTS_RUNTIME（恒内置）
 - 键访问用点号路径：get("push.port") → config["push"]["port"]
-- 路径类配置（crypto.key_file / file_send 目录）支持相对项目根写法，经 resolve_path 解析
+- 路径类配置（crypto.key_file / file_send 目录）支持相对数据根写法，经 resolve_path 解析
 - 归属：bridge 基础设施层（bridge 必须能不依赖模块运行）；modules/common 经
   `from bridge.config import get` 读取——模块依赖基础设施为设计方向
 
@@ -12,28 +12,48 @@
 """
 from __future__ import annotations
 
+import os as _os
+import sys as _sys
 from pathlib import Path
 
 import yaml
 
-# ---- 部署根 / 资源根（打包形态适配）----
+# ---- 部署根 / 数据根 / 资源根（打包形态适配）----
 # PyInstaller onefile 打包后：__file__ 在临时解包目录（_MEIPASS），
-# 用户数据（.config/ 等）必须落在可执行文件所在目录，否则重启即丢；
-# 只读资源（static/templates）从解包目录读取。
-import sys as _sys
-
+# 程序本体（exe）所在目录与解包目录都不可作为持久数据位置；
+# 用户数据按平台规范落用户目录（exe 是部署包，不是数据包）。
 _FROZEN = getattr(_sys, "frozen", False)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent          # 源码形态项目根
-DEPLOY_ROOT = (Path(_sys.executable).resolve().parent if _FROZEN else PROJECT_ROOT)  # 用户数据根
+DEPLOY_ROOT = (Path(_sys.executable).resolve().parent if _FROZEN else PROJECT_ROOT)  # 程序根（exe/项目）
 RESOURCE_ROOT = (Path(getattr(_sys, "_MEIPASS", PROJECT_ROOT)) if _FROZEN else PROJECT_ROOT)  # 资源根
-CONFIG_FILE = DEPLOY_ROOT / ".config" / "config.yaml"
 
-# 运行时根：源码形态 = 项目根；打包形态 = 可执行文件旁（用户数据区）。
-# 模块系统（registry/register/module_source/scheduler/jobs/permissions）与
-# bridge 工作区（logs/inbox/_archive/agent-SDK/状态文件）统一以 WORK_ROOT 定位——
-# 打包形态下 __file__ 指向只读临时解包目录，落盘必须走这里，否则重启即丢。
-WORK_ROOT = DEPLOY_ROOT if _FROZEN else PROJECT_ROOT
+
+def _default_data_root() -> Path:
+    """平台规范数据根：
+    - Windows：%LOCALAPPDATA%\\wechat-claw（用户目录新建文件夹）
+    - macOS：~/Library/Application Support/wechat-claw（平台惯例）
+    - Linux/其他：~/.local/share/wechat-claw（XDG 单目录）
+    """
+    if _os.name == "nt":
+        base = _os.environ.get("LOCALAPPDATA") or str(Path.home())
+        return Path(base) / "wechat-claw"
+    if _sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "wechat-claw"
+    return Path.home() / ".local" / "share" / "wechat-claw"
+
+
+# 用户数据根：源码形态保持项目根（开发自洽、无需迁移）；打包形态落平台规范用户目录
+# （exe 是部署包不是数据包，exe 目录/解包目录都不可作为持久数据位置）。
+# WC_DATA_ROOT 环境变量可覆盖（测试隔离 / 自定义部署）。
+DATA_ROOT = Path(_os.environ.get("WC_DATA_ROOT")
+                  or (_default_data_root() if _FROZEN else PROJECT_ROOT))
+
+# 运行时根 = 数据根：模块系统（registry/register/module_source/scheduler/jobs/permissions）
+# 与 bridge 工作区（logs/inbox/_archive/agent-SDK/状态文件）统一以 WORK_ROOT 定位——
+# 打包形态下 __file__ 指向只读临时解包目录，落盘必须走数据根，否则重启即丢。
+WORK_ROOT = DATA_ROOT
 MODULES_ROOT = WORK_ROOT / "modules"
+CONFIG_FILE = WORK_ROOT / ".config" / "config.yaml"
 
 # ---- 运行参数（bridge 内置，不可被配置文件覆盖）----
 DEFAULTS_RUNTIME: dict = {
@@ -68,14 +88,14 @@ DEFAULTS_USER: dict = {
     "file_send": {
         "default_dirs": [
             "~/文档", "~/下载", "~/桌面", "~/图片",
-            "~/音乐", "~/视频", "~/公共", "inbox",   # inbox = <项目根>/inbox
+            "~/音乐", "~/视频", "~/公共", "inbox",   # inbox = <数据根>/inbox
         ],
-        "reject_dirs": [".config", "~/.ssh", "~/.gnupg"],  # .config = <项目根>/.config
+        "reject_dirs": [".config", "~/.ssh", "~/.gnupg"],  # .config = <数据根>/.config
         "reject_name_re": "token|secret|credential|private|anniversaries\\.json\\.enc",
         "reject_suffixes": [".key", ".pem", ".p12", ".pfx", ".p8"],
     },
     "crypto": {
-        "key_file": ".config/crypto.key",   # 相对项目根
+        "key_file": ".config/crypto.key",   # 相对数据根
     },
 }
 
@@ -86,14 +106,14 @@ _cached: dict | None = None
 
 
 def resolve_path(p: str | Path) -> Path:
-    """解析配置里的路径：绝对路径/含 ~ 直接展开；相对路径基于项目根拼接。"""
+    """解析配置里的路径：绝对路径/含 ~ 直接展开；相对路径基于数据根拼接。"""
     s = str(p)
     if s.startswith("~"):
         return Path(s).expanduser().resolve()
     path = Path(s)
     if path.is_absolute():
         return path.resolve()
-    return (DEPLOY_ROOT / path).resolve()
+    return (DATA_ROOT / path).resolve()
 
 
 def _load() -> dict:

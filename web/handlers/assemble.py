@@ -12,6 +12,12 @@ PY = PROJECT_ROOT / ".venv" / ("Scripts/python.exe" if __import__("os").name == 
 PIP = PROJECT_ROOT / ".venv" / ("Scripts/pip.exe" if __import__("os").name == "nt" else "bin/pip")
 
 
+def _assemble_done(app, ok: bool) -> None:
+    """装配 Job 完成回调：成功 → 步骤完成（服务端落状态，门禁/重访可用）。"""
+    if ok:
+        app.steps["assemble"] = True
+
+
 def handle(app, body: dict | None = None) -> dict:
     if getattr(__import__("sys"), "frozen", False):
         # 打包形态：Python/依赖已随可执行文件，无需装配
@@ -24,7 +30,7 @@ def handle(app, body: dict | None = None) -> dict:
         [str(PIP), "install", "-e", str(PROJECT_ROOT / "vendor" / "wechat_agent_sdk")],
         [str(PY), str(PROJECT_ROOT / "patches" / "apply_patches.py"), "--vendor", "--check-only"],
     ]
-    app.start_job("assemble", commands)
+    app.start_job("assemble", commands, on_done=lambda ok: _assemble_done(app, ok))
     return {"ok": True, "started": True}
 
 

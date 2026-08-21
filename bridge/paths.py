@@ -6,7 +6,7 @@
 - "reject"：token/密钥相关，无论哪个通道、gate 是否批准都拒绝
 
 清单可配置：config.yaml file_send.*（default_dirs / reject_dirs / reject_name_re / reject_suffixes）。
-路径支持相对项目根写法（如 "inbox" / ".config"），经 bridge.config.resolve_path 解析。
+路径支持相对数据根写法（如 "inbox" / ".config"），经 bridge.config.resolve_path 解析。
 防绕过：resolve() 规范化（../ 收敛）+ 符号链接目标重新分级。
 """
 from __future__ import annotations

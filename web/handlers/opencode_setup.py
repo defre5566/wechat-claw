@@ -1,60 +1,125 @@
-"""② opencode 检测与引导（不再自动执行远程脚本，S5 供应链风险收敛）。
+"""② opencode 检测与自动安装（长任务 Job，进度可监控）。
 
-- 检测 opencode --version：已安装 → 向导该步通过
-- 未安装 → 返回官方安装命令 + 文档链接，由用户本机手动执行后点"重新检测"
-- 不在 wizard 进程内 `curl|bash`：bridge 进程能读 crypto.key/微信 token，远程脚本管道
-  执行存在供应链风险（opencode.ai 被攻陷即一锅端），与项目"高危先确认"文化不符
+- 检测：PATH 中 opencode → ~/.opencode/bin/opencode（官方默认安装目录，Windows 同名 .exe）
+- 安装（web 打开前由 wizard 启动时自动触发，也可在向导内手动点）：
+  - Linux/macOS：官方安装脚本 `curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path`
+    （脚本处理 arch/musl/AVX2 baseline，非交互、无需 sudo、失败退出码非 0；
+    --no-modify-path 不污染 shell 配置，由 config_gen 写 acp.command 绝对路径）
+  - Windows：官方 install.ps1 已下线（404），改为直接下载官方 release zip 解压到
+    %USERPROFILE%\\.opencode\\bin\\（不依赖 bash/包管理器；只下载官方二进制，不执行远程脚本）
+- 安装成功 → 重新检测 → app.steps["opencode"] = True（前端门禁放行）
 """
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 
-# 官方安装命令（按平台）；文档链接
-_INSTALL_CMD = {
-    "posix": "curl -fsSL https://opencode.ai/install | bash",
-    "nt": "irm https://opencode.ai/install.ps1 | iex",
-}
+# 官方默认安装目录（install 脚本 INSTALL_DIR；Windows 同名）
+_INSTALL_DIR = os.path.expanduser("~/.opencode/bin")
 _DOC_URL = "https://opencode.ai/docs/install"
+_POSIX_CMD = "curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path"
+# Windows：官方 release zip（x64），下载解压即可，无管道执行远程脚本
+_WIN_ZIP_URL = "https://github.com/anomalyco/opencode/releases/latest/download/opencode-windows-x64.zip"
 
 
-def _detect() -> dict:
-    try:
-        r = subprocess.run(
-            ["opencode", "--version"], capture_output=True, text=True, timeout=15
-        )
+def _bin_name() -> str:
+    return "opencode.exe" if os.name == "nt" else "opencode"
+
+
+def detect_installed() -> dict | None:
+    """检测 opencode：PATH 优先，其次官方默认安装目录。返回 {version, path} 或 None。"""
+    exe = _bin_name()
+    cands: list[str] = []
+    which = shutil.which("opencode")
+    if which:
+        cands.append(which)
+    for name in ("opencode.exe", "opencode"):  # Windows zip 解压后文件名不固定
+        p = os.path.join(_INSTALL_DIR, name)
+        if os.path.isfile(p) and p not in cands:
+            cands.append(p)
+    for p in cands:
+        try:
+            r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=15)
+        except Exception:
+            continue
         if r.returncode == 0:
             out = (r.stdout or r.stderr or "").strip().splitlines()
-            return {"ok": True, "value": out[0] if out else "已安装"}
-    except Exception:
-        pass
-    return {"ok": False, "value": "未安装"}
+            return {"version": out[0] if out else "已安装", "path": p}
+    return None
 
 
-def handle(app, body: dict | None = None) -> dict:
-    # selftest：mock 已安装（CI 全新 runner 无 opencode，且不再走网络安装）
+def build_install_commands() -> list[list[str]]:
+    """分平台安装命令（作为长任务 Job 依次执行）。"""
+    if os.name == "nt":
+        # PowerShell：下载官方 release zip → 解压到安装目录 → 归一化 opencode.exe → 清理
+        install_dir = _INSTALL_DIR.replace("'", "''")
+        ps = (
+            "$ErrorActionPreference='Stop';"
+            f"$dir='{install_dir}';"
+            "New-Item -ItemType Directory -Force -Path $dir | Out-Null;"
+            "$tmp=Join-Path $env:TEMP 'opencode-windows-x64.zip';"
+            f"Invoke-WebRequest -Uri '{_WIN_ZIP_URL}' -OutFile $tmp;"
+            "Expand-Archive -Force -Path $tmp -DestinationPath $dir;"
+            "$exe=Get-ChildItem -Path $dir -Recurse -File | Where-Object { $_.Name -like 'opencode*' } | "
+            "Select-Object -First 1;"
+            "if ($exe) { Copy-Item -Force $exe.FullName (Join-Path $dir 'opencode.exe') };"
+            "Remove-Item -Force $tmp"
+        )
+        return [["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]]
+    return [["bash", "-c", f"set -o pipefail; {_POSIX_CMD}"]]
+
+
+def install_done(app, ok: bool) -> None:
+    """安装 Job 完成回调：成功 → 标记步骤完成。"""
+    if ok:
+        app.steps["opencode"] = True
+
+
+def detect(app, body: dict | None = None) -> dict:
+    """纯检测（前端「重新检测」用）：已装 → already；未装 → 返回手动安装命令/文档。"""
     if SELFTEST:
         app.steps["opencode"] = True
         return {"ok": True, "already": True, "version": "selftest-mock"}
-
-    detect = _detect()
-    if detect["ok"]:
+    d = detect_installed()
+    if d:
         app.steps["opencode"] = True
-        return {"ok": True, "already": True, "version": detect["value"]}
-
-    # 未安装：返回官方命令 + 文档，由用户手动安装后重新检测（不在本进程执行远程脚本）
-    cmd = _INSTALL_CMD["nt" if os.name == "nt" else "posix"]
+        return {"ok": True, "already": True, "version": d["version"]}
     return {
         "ok": False,
         "missing": True,
-        "cmd": cmd,
+        "cmd": _POSIX_CMD if os.name != "nt" else _WIN_ZIP_URL,
         "doc": _DOC_URL,
-        "hint": "请在终端手动执行上述命令安装 opencode，完成后点「重新检测」",
+        "hint": "未检测到 opencode，可点「自动安装」或复制下方命令手动安装",
     }
 
 
+def install(app, body: dict | None = None) -> dict:
+    """自动安装：已装 → already；任务运行中 → running；否则启动长任务 Job。"""
+    if SELFTEST:
+        app.steps["opencode"] = True
+        return {"ok": True, "already": True, "version": "selftest-mock"}
+    d = detect_installed()
+    if d:
+        app.steps["opencode"] = True
+        return {"ok": True, "already": True, "version": d["version"]}
+    if app.job_running():
+        return {"ok": False, "error": "已有任务运行中"}, 409
+    app.start_job("opencode_install", build_install_commands(), on_done=install_done)
+    return {"ok": True, "started": True}
+
+
 def status(app, body: dict | None = None) -> dict:
-    # 不再有安装长任务；保留接口供前端兼容，恒为 done
-    return {"ok": True, "done": True, "lines": []}
+    """安装 Job 增量日志（前端轮询显示进度）。started=false 表示从未启动。"""
+    job = app.get_job("opencode_install")
+    if job is None:
+        return {"ok": True, "started": False, "done": False, "lines": []}
+    snap = job
+    snap["started"] = True
+    return snap
+
+
+# 兼容旧调用（selftest 用 POST /api/opencode/install 断言 ok）
+handle = install

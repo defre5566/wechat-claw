@@ -54,12 +54,17 @@ def _req(port: int, method: str, path: str, body: dict | None = None,
 
 
 def main() -> int:
-    # 启动时快照：已部署实例（.config 已存在）拒绝执行——
-    # selftest 末尾会 rmtree(ROOT/.config)，在真实部署上误跑会丢 crypto.key/密码/用户数据
-    existing_config = (ROOT / ".config").exists()
+    # 启动时快照：已部署实例（真实数据根已存在）拒绝执行——
+    # selftest 末尾会清理测试数据，在真实部署上误跑会丢 crypto.key/密码/用户数据
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from bridge.config import DATA_ROOT as PROD_DATA_ROOT
+    # 兼容旧版部署：数据根可能还在项目根 .config（迁移不做，但误跑清理会丢数据）
+    legacy_config = (ROOT / ".config").exists()
+    existing_config = (PROD_DATA_ROOT / ".config").exists() or legacy_config
     if existing_config and os.environ.get("WC_SELFTEST_FORCE") != "1":
-        print("NG: 检测到已存在的 .config（疑似已部署实例）。")
-        print("    selftest 末尾会清空 .config，在真实部署上误跑会永久丢失 crypto.key/密码/用户数据。")
+        print(f"NG: 检测到已存在的数据根 {PROD_DATA_ROOT}（疑似已部署实例）。")
+        print("    selftest 会清理测试数据，在真实部署上误跑会永久丢失 crypto.key/密码/用户数据。")
         print("    如确认要在本机跑，请设环境变量 WC_SELFTEST_FORCE=1 后重试。")
         return 1
 
@@ -67,6 +72,7 @@ def main() -> int:
         home = Path(tmp)
         env = dict(os.environ)
         env["HOME"] = str(home)
+        env["LOCALAPPDATA"] = str(home / "AppData" / "Local")  # Windows 数据根跟随隔离
         env["WEB_SELFTEST"] = "1"
         env["WEB_PORT"] = "0"  # 端口由 selftest 固定
 
@@ -195,13 +201,16 @@ def main() -> int:
                 proc.wait(timeout=5)
             except Exception:
                 proc.kill()
-            # 清理测试产物：.config/（配置/密钥/密码/用户数据）+ 恢复默认 AGENTS.md
-            shutil.rmtree(ROOT / ".config", ignore_errors=True)
+            # 清理测试产物：临时数据根由 TemporaryDirectory 回收；AGENTS.md 恢复走同一隔离 env
+            shutil.rmtree(home / ".local" / "share" / "wechat-claw", ignore_errors=True)
+            shutil.rmtree(home / "Library" / "Application Support" / "wechat-claw",
+                          ignore_errors=True)
+            shutil.rmtree(home / "AppData" / "Local" / "wechat-claw", ignore_errors=True)
             try:
                 subprocess.run(
                     [str(PY), "-c",
                      "import sys; sys.path.insert(0, r'%s'); import web.agent_gen as a; a.write_agents()" % str(ROOT)],
-                    cwd=str(ROOT), capture_output=True, timeout=30,
+                    cwd=str(ROOT), env=env, capture_output=True, timeout=30,
                 )
             except Exception:
                 pass

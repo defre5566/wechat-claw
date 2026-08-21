@@ -8,15 +8,15 @@ import base64
 import json
 import math
 
-from bridge.config import CONFIG_FILE, DEFAULTS_USER, DEPLOY_ROOT, RESOURCE_ROOT
+from bridge.config import CONFIG_FILE, DATA_ROOT, DEFAULTS_USER, RESOURCE_ROOT
 from modules.common import get_city, get_habits, get_location, set_city, set_habits, undo_city, undo_habits
 from modules.registry_index import build_index
 from web import agent_gen, auth
 
 CITIES_PATH = RESOURCE_ROOT / "web" / "static" / "cities.json"
 
-AVATAR_FILE = DEPLOY_ROOT / ".config" / "avatar.png"
-AVATAR_PREV = DEPLOY_ROOT / ".config" / "avatar.prev.png"
+AVATAR_FILE = DATA_ROOT / ".config" / "avatar.png"
+AVATAR_PREV = DATA_ROOT / ".config" / "avatar.prev.png"
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 _cities_cache: list | None = None
 

@@ -1,4 +1,4 @@
-"""AGENTS.md 生成器：读 .config/agent/ 字段 → 套锁定模板 → 覆盖项目根 AGENTS.md。
+"""AGENTS.md 生成器：读 .config/agent/ 字段 → 套锁定模板 → 覆盖数据根 AGENTS.md。
 
 - 字段真源：.config/agent/identity.json（role/language/address/assistant_name）
   + .config/agent/rules.json（行为守则列表），均带 .prev 撤销（经 common._userdata）
@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bridge.config import DEPLOY_ROOT, RESOURCE_ROOT
+from bridge.config import DATA_ROOT, RESOURCE_ROOT
 from modules.common import _userdata
 
 TEMPLATE = RESOURCE_ROOT / "web" / "templates" / "AGENTS.tmpl"
-OUTPUT = DEPLOY_ROOT / "AGENTS.md"
+OUTPUT = DATA_ROOT / "AGENTS.md"
 
 # 中立默认人设（= 默认产物 AGENTS.md 的字段值，未填字段时使用）
 DEFAULTS: dict = {

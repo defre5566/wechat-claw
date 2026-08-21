@@ -140,7 +140,8 @@ def _h(module: str, func: str, need_auth: bool = False):
 
 ROUTES = {
     ("POST", "/api/env_check"): _h("env_check", "handle"),
-    ("POST", "/api/opencode/install"): _h("opencode_setup", "handle"),
+    ("POST", "/api/opencode/detect"): _h("opencode_setup", "detect"),
+    ("POST", "/api/opencode/install"): _h("opencode_setup", "install"),
     ("GET", "/api/opencode/status"): _h("opencode_setup", "status"),
     ("POST", "/api/assemble"): _h("assemble", "handle"),
     ("GET", "/api/assemble/status"): _h("assemble", "status"),
@@ -289,10 +290,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._file_bytes(data, ctype)
             return
         route = ROUTES.get(("GET", path))
-        if route is None:
-            self._json(404, {"ok": False, "error": "not found"})
+        if route is not None:
+            self._dispatch(route, None)
             return
-        self._dispatch(route, None)
+        # 兜底：static 根下同路径资源——页面以相对路径引用 theme.css/api.js 等，
+        # 若不兜底会 404（UI 裸样式 + 向导脚本失效），realpath 校验防穿越
+        if not path.startswith("/api/"):
+            self._serve_static(path.lstrip("/"))
+            return
+        self._json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
         if not self._guard():
@@ -336,6 +342,21 @@ class Handler(BaseHTTPRequestHandler):
         self._json(status, data)
 
 
+def _maybe_autostart_opencode(app: WizardApp) -> None:
+    """web 打开前即后台自动安装 opencode（未安装时；selftest 跳过）。"""
+    from web.handlers import opencode_setup
+    if opencode_setup.SELFTEST:
+        return
+    if opencode_setup.detect_installed():
+        return
+    if app.job_running():
+        return
+    cmds = opencode_setup.build_install_commands()
+    if cmds:
+        app.start_job("opencode_install", cmds, on_done=lambda ok: opencode_setup.install_done(app, ok))
+        print("[wizard] opencode 未安装，已在后台启动自动安装（web 界面可看进度）")
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
     # 打包形态 bridge 模式：`wechat-claw -m bridge.main`（service_up / nssm 启动命令）
@@ -366,6 +387,7 @@ def main(argv: list[str] | None = None) -> int:
             webbrowser.open(url)
         except Exception:  # noqa: BLE001
             print(f"[wizard] 请手动打开浏览器访问 {url}")
+        _maybe_autostart_opencode(APP)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

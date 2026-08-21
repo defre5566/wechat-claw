@@ -1,6 +1,6 @@
 """管理密码：pbkdf2 哈希 + 会话 token（进程内存，30 分钟）。
 
-- 存储：<项目根>/.config/admin.password，内容 "salt$hash"（hex），chmod 600
+- 存储：<数据根>/.config/admin.password，内容 "salt$hash"（hex），chmod 600
 - 校验：恒定时间比较（hmac.compare_digest）
 - 会话：wizard 进程内存表 {token: expires_at}；改密码清空所有会话；
   重启服务会话即失效（重新登录）
@@ -13,9 +13,9 @@ import hmac
 import secrets
 import time
 
-from bridge.config import DEPLOY_ROOT
+from bridge.config import DATA_ROOT
 
-PASSWORD_FILE = DEPLOY_ROOT / ".config" / "admin.password"
+PASSWORD_FILE = DATA_ROOT / ".config" / "admin.password"
 
 PBKDF2_ITERATIONS = 100_000
 SALT_BYTES = 32
