@@ -108,12 +108,18 @@ EOF
 
 ## 安全模型
 
-- **deny 五项**：对话 agent 不可读 `modules/**/token`、`agent-SDK/push_token`、`anniversaries.json.enc`、`.config/crypto.key`、`.config/admin.password`、`~/.wechat-agent-sdk/accounts.json`（opencode.jsonc.example 默认配置）
-- **文件发送三级**：个人目录直发 / 其余路径微信确认（30s 无回复拒绝）/ token 密钥类硬拒（bridge/paths.py 单点执行，路径规范化防 `../` 与符号链接绕过）
+- **deny 六项**：对话 agent 不可读 `modules/**/token`、`agent-SDK/push_token`、`modules/**/anniversaries.json.enc`、`agent-SDK/**`、`.config/crypto.key`、`.config/admin.password`（opencode.jsonc.example 默认配置）
+- **文件发送三级**：个人目录直发 / 其余路径微信确认（30s 无回复拒绝）/ token 密钥类硬拒（bridge/paths.py 单点执行，路径规范化防 `../` 与符号链接绕过；`accounts.json` 与 SDK 凭证目录在硬拒清单）
 - **/push 鉴权**：Bearer token 常量时间比较 + sha256 命中模块索引哈希放行，401 记日志（仅 IP，不记 token 片段）
 - **资源保护**：/push body 上限 100MB（413）、队列有界（满 503）
 - **S1 防护**：会话失效 → critical 日志 + 非零退出 → systemd StartLimit 终止循环重启
-- **隐私数据**：AES-GCM 加密存储（common/crypto.py），密钥 chmod 600 + deny
+- **隐私数据**：AES-GCM 加密存储（common/crypto.py），密钥 chmod 600 + deny；微信登录凭证静态加密（SDK 存储层）
+
+## 模块更新与信任
+
+- 「官方模块库」为**作者个人维护**的 GitHub 仓库，非机构渠道；每日自动更新即代表信任作者账号安全，第三方自定义源风险自担
+- 传输防篡改：模块包 sha256 与 manifest 比对；发布形态启用 Ed25519 签名后，manifest 变更必须通过内置公钥验签，失败拒绝更新
+- 部署机数据根 `.config/trust/TRUST-NOTICE.md` 有完整信任模型存档
 
 ## 模块开发
 

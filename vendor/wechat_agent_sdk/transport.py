@@ -132,6 +132,18 @@ class WeChatTransport:
         self._client.token = token
         await self._storage.save_token(self._account_id, token)
 
+    async def restore_token(self, account_id: Optional[str] = None) -> Optional[str]:
+        """Load a previously saved token into the client (wechat-claw patch).
+
+        Returns the token, or None when nothing is saved. Callers may use it
+        to reuse a persisted login without touching private members.
+        """
+        aid = account_id or self._account_id
+        stored = await self._storage.load_token(aid)
+        if stored:
+            self._client.token = stored
+        return stored
+
     # ── Login ──
 
     async def login_terminal(self, log: callable = print) -> str:

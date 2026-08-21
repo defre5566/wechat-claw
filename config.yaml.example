@@ -4,7 +4,7 @@
 # 说明：
 #   - 运行参数（push/session/scheduler/log）由 bridge 内置，**不可在此配置**（文件不生效）
 #   - 模块业务配置（城市/vault 路径等）属模块层，勿写进本文件
-#   - 路径支持相对项目根写法（如 inbox、.config/crypto.key）
+#   - 路径支持相对项目根写法（如 inbox、.config/crypto.key）；reject_dirs 的 agent-SDK 亦相对项目根
 
 # opencode 子进程
 acp:
@@ -24,9 +24,11 @@ file_send:
     - inbox               # 相对项目根（微信收到的媒体文件目录）
   reject_dirs:
     - .config             # 相对项目根（用户配置/密钥目录，硬拒）
+    - agent-SDK           # 相对项目根（微信 SDK 登录凭证目录，硬拒）
+    - ~/.wechat-agent-sdk # 旧版 SDK 默认凭证目录（兼容，硬拒）
     - ~/.ssh
     - ~/.gnupg
-  reject_name_re: token|secret|credential|private|anniversaries\.json\.enc
+  reject_name_re: token|secret|credential|private|accounts\.json|anniversaries\.json\.enc
   reject_suffixes:
     - .key
     - .pem

@@ -267,7 +267,7 @@ class BridgeCore:
         except Exception as e:
             log.error(f"处理失败: {e}")
             await self._transport.send_typing(conversation_id, start=False, context_token=self._last_token.get(conversation_id, ""))
-            await self.send_text(conversation_id, f"处理出错：{e}")
+            await self.send_text(conversation_id, "（内部处理失败，详情见日志）")
 
     async def _route_inbound(self, conversation_id: str, text: str) -> bool:
         """B：入站路由——enabled 模块的 inbound 订阅按 priority 顺序匹配意图。
@@ -342,10 +342,8 @@ class BridgeCore:
         WORKDIR.mkdir(parents=True, exist_ok=True)
 
         self._transport = WeChatTransport(account_id="default")
-        # 手动从 storage 加载已保存的 token（WeChatBot.login_terminal 才会自动加载，纯 transport 不会）
-        stored = await self._transport._storage.load_token("default")
-        if stored:
-            self._transport._client.token = stored
+        # 复用已保存登录态（SDK 公共接口 restore_token，vendor 补丁⑧注入——不摸私有成员）
+        stored = await self._transport.restore_token()
         if self._transport.needs_login:
             log.critical("未登录，请先完成登录（扫码流程见 docs/开发文档-03 A3）")
             raise SystemExit(1)  # 非零退出，systemd 可感知（配合 StartLimit 停止循环重启）

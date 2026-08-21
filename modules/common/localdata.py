@@ -99,10 +99,10 @@ def _fetch_pollen(loc: dict) -> dict | None:
     }
 
 
-# --- typhoon（中央气象台台风网 typhoon.nmc.cn，公开 JSONP 接口） ---
+# --- typhoon（中央气象台台风网 typhoon.nmc.cn，公开 JSONP 接口；HTTPS 可访问） ---
 
-TYPHOON_LIST_API = "http://typhoon.nmc.cn/weatherservice/typhoon/jsons/list_default?t={ts}&callback=typhoon_jsons_list_default"
-TYPHOON_VIEW_API = "http://typhoon.nmc.cn/weatherservice/typhoon/jsons/view_{tid}?t={ts}&callback=typhoon_jsons_view_{tid}"
+TYPHOON_LIST_API = "https://typhoon.nmc.cn/weatherservice/typhoon/jsons/list_default?t={ts}&callback=typhoon_jsons_list_default"
+TYPHOON_VIEW_API = "https://typhoon.nmc.cn/weatherservice/typhoon/jsons/view_{tid}?t={ts}&callback=typhoon_jsons_view_{tid}"
 TYPHOON_GRADE = {"TC": "热带气旋", "TD": "热带低压", "TS": "热带风暴", "STS": "强热带风暴",
                  "TY": "台风", "STY": "强台风", "SuperTY": "超强台风"}
 

@@ -129,6 +129,42 @@ def _fingerprint(manifest: dict) -> str:
     ).hexdigest()
 
 
+def verify_manifest_signature(mod_root: Path) -> str | None:
+    """验签 manifest.json（manifest.sig，Ed25519）；错误返回描述；未启用/非 builtin 返回 None。
+
+    公钥未配置（SIGNING_PUBLIC_KEY 空）= 签名未启用，跳过（发布前状态）。
+    仅 builtin 源强制验签；自定义源信任自担（web 已有"只装信任来源"提示）。
+    """
+    if auth_signin_pubkey() is None:
+        return None
+    sig_file = mod_root / "manifest.sig"
+    if not sig_file.is_file():
+        return "缺少 manifest.sig（模块源未签名，作者需运行 scripts/sign_manifest.py）"
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    pubkey = Ed25519PublicKey.from_public_bytes(auth_signin_pubkey())
+    try:
+        sig = bytes.fromhex(sig_file.read_text().strip())
+        pubkey.verify(sig, (mod_root / "manifest.json").read_bytes())
+        return None
+    except InvalidSignature:
+        return "manifest 签名校验失败：内容被篡改或非作者发布，已拒绝更新"
+    except Exception as e:
+        return f"签名校验异常: {e}"
+
+
+def auth_signin_pubkey() -> bytes | None:
+    """签名公钥原始字节；未配置返回 None（未启用）。"""
+    from bridge.config import SIGNING_PUBLIC_KEY
+    pub = str(SIGNING_PUBLIC_KEY or "").strip()
+    if not pub:
+        return None
+    try:
+        return bytes.fromhex(pub)
+    except (ValueError, TypeError):
+        return None
+
+
 def fetch_source(src: dict) -> dict:
     """拉取源的最新模块列表 + 指纹；返回 {ok, modules, fingerprint, error}。"""
     if src.get("type") == "local":
@@ -138,6 +174,10 @@ def fetch_source(src: dict) -> dict:
         manifest = _read_manifest(root)
         if manifest is None:
             return {"ok": False, "modules": [], "fingerprint": "", "error": "源缺少 manifest.json"}
+        if src.get("builtin"):
+            err = verify_manifest_signature(root)
+            if err:
+                return {"ok": False, "modules": [], "fingerprint": "", "error": err}
         fp = _fingerprint(manifest)
         return {"ok": True, "modules": _list_modules_from_manifest(manifest), "fingerprint": fp}
 
@@ -149,6 +189,10 @@ def fetch_source(src: dict) -> dict:
         manifest = _read_manifest(tmp)
         if manifest is None:
             return {"ok": False, "modules": [], "fingerprint": "", "error": "源缺少 manifest.json"}
+        if src.get("builtin"):
+            err = verify_manifest_signature(tmp)
+            if err:
+                return {"ok": False, "modules": [], "fingerprint": "", "error": err}
         fp = _fingerprint(manifest)
         return {"ok": True, "modules": _list_modules_from_manifest(manifest), "fingerprint": fp}
     finally:

@@ -101,6 +101,86 @@ PATCHES = [
         'os.environ.get("WECHAT_AGENT_SDK_STATE_DIR")',
         "⑦ storage.py 存储目录可经环境变量重定向",
     ),
+    (
+        TRANSPORT,
+        '    async def activate_token(self, token: str) -> None:\n        """\n        Inject a new token (e.g. after platform handles re-login).\n\n        Persists the token to storage and updates the HTTP client.\n        """\n        self._client.token = token\n        await self._storage.save_token(self._account_id, token)',
+        '    async def activate_token(self, token: str) -> None:\n        """\n        Inject a new token (e.g. after platform handles re-login).\n\n        Persists the token to storage and updates the HTTP client.\n        """\n        self._client.token = token\n        await self._storage.save_token(self._account_id, token)\n\n    async def restore_token(self, account_id: Optional[str] = None) -> Optional[str]:\n        """Load a previously saved token into the client (wechat-claw patch).\n\n        Returns the token, or None when nothing is saved. Callers may use it\n        to reuse a persisted login without touching private members.\n        """\n        aid = account_id or self._account_id\n        stored = await self._storage.load_token(aid)\n        if stored:\n            self._client.token = stored\n        return stored',
+        "async def restore_token(self",
+        "⑧ transport.py 公共 restore_token（bridge 不再摸私有成员）",
+    ),
+    (
+        STORAGE,
+        '"""Pluggable account state persistence."""\n\nfrom __future__ import annotations\n\nimport json\nimport logging\nfrom abc import ABC, abstractmethod\nimport os\nfrom pathlib import Path\nfrom typing import Optional\n\nlogger = logging.getLogger(__name__)\n\n# wechat-claw 补丁：支持 WECHAT_AGENT_SDK_STATE_DIR 环境变量重定向存储目录\n# （默认 ~/.wechat-agent-sdk，部署时由 bridge.config 收敛到数据根）\nDEFAULT_STATE_DIR = Path(os.environ.get("WECHAT_AGENT_SDK_STATE_DIR")\n                            or (Path.home() / ".wechat-agent-sdk"))',
+        '"""Pluggable account state persistence."""\n\nfrom __future__ import annotations\n\nimport base64\nimport json\nimport logging\nimport os\nimport secrets\nfrom abc import ABC, abstractmethod\nfrom pathlib import Path\nfrom typing import Any, Optional\n\nlogger = logging.getLogger(__name__)\n\n# wechat-claw 补丁：支持 WECHAT_AGENT_SDK_STATE_DIR 环境变量重定向存储目录\n# （默认 ~/.wechat-agent-sdk，部署时由 bridge.config 收敛到数据根）\nDEFAULT_STATE_DIR = Path(os.environ.get("WECHAT_AGENT_SDK_STATE_DIR")\n                            or (Path.home() / ".wechat-agent-sdk"))\n\n# wechat-claw 补丁：accounts.json 静态加密（AES-GCM，密钥 = WECHAT_AGENT_SDK_KEY_FILE\n# 指向的 16/24/32B 文件，与 wechat-claw crypto.key 同源；密文带 enc:v1: 前缀，\n# 旧明文文件兼容读取、下次保存自动转密；SDK 无 cryptography/密钥时明文运行并告警）\n_ENCRYPT_PREFIX = "enc:v1:"\n\n\ndef _make_cipher() -> Optional[Any]:\n    try:\n        from cryptography.hazmat.primitives.ciphers.aead import AESGCM\n    except ImportError:\n        logger.warning("[storage] 无 cryptography，accounts.json 将明文保存")\n        return None\n    key_file = os.environ.get("WECHAT_AGENT_SDK_KEY_FILE")\n    if not key_file:\n        logger.warning("[storage] 未设置 WECHAT_AGENT_SDK_KEY_FILE，accounts.json 将明文保存")\n        return None\n    try:\n        raw = Path(key_file).read_bytes()\n        if len(raw) not in (16, 24, 32):\n            logger.warning("[storage] 密钥长度异常（%d B），accounts.json 将明文保存", len(raw))\n            return None\n        return AESGCM(raw)\n    except OSError as e:\n        logger.warning("[storage] 读取密钥失败: %s，accounts.json 将明文保存", e)\n        return None\n\n\ndef _encrypt_text(plain: str, cipher: Any) -> str:\n    nonce = secrets.token_bytes(12)\n    ct = cipher.encrypt(nonce, plain.encode("utf-8"), None)\n    return _ENCRYPT_PREFIX + base64.b64encode(nonce + ct).decode("ascii")\n\n\ndef _decrypt_text(raw: str, cipher: Any) -> Optional[str]:\n    if not raw.startswith(_ENCRYPT_PREFIX):\n        return None  # 旧明文格式（兼容首读）\n    try:\n        blob = base64.b64decode(raw[len(_ENCRYPT_PREFIX):])\n        nonce, ct = blob[:12], blob[12:]\n        return cipher.decrypt(nonce, ct, None).decode("utf-8")\n    except Exception:\n        logger.warning("[storage] accounts.json 解密失败（密钥变更？），按未登录处理")\n        return None',
+        "_ENCRYPT_PREFIX",
+        "⑨ storage.py accounts.json 静态加密（AES-GCM，env 密钥）",
+    ),
+    (
+        STORAGE,
+        '''    def _load(self) -> dict:
+        if self._data is not None:
+            return self._data
+
+        if self._file.exists():
+            try:
+                self._data = json.loads(self._file.read_text())
+            except (json.JSONDecodeError, OSError):
+                self._data = {}
+        else:
+            self._data = {}
+
+        return self._data
+
+    def _save(self) -> None:
+        self._state_dir.mkdir(parents=True, exist_ok=True)
+        self._file.write_text(json.dumps(self._data or {}, indent=2))
+        # 敏感凭据：收紧到 0600（wechat-claw 补丁；默认 umask 644 可被本机其他用户读取）
+        try:
+            self._file.chmod(0o600)
+        except OSError:
+            pass''',
+        '''    def _load(self) -> dict:
+        if self._data is not None:
+            return self._data
+
+        if self._file.exists():
+            try:
+                raw = self._file.read_text()
+                cipher = _make_cipher()
+                if raw.startswith(_ENCRYPT_PREFIX):
+                    if cipher is None:
+                        logger.warning("[storage] 无法解密 accounts.json（无密钥/cryptography），按未登录处理")
+                        self._data = {}
+                        return self._data
+                    plain = _decrypt_text(raw, cipher)
+                    self._data = json.loads(plain) if plain is not None else {}
+                else:
+                    self._data = json.loads(raw)  # 兼容：旧明文文件
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("[storage] accounts.json 读取失败: %s", e)
+                self._data = {}
+        else:
+            self._data = {}
+
+        return self._data
+
+    def _save(self) -> None:
+        self._state_dir.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(self._data or {}, indent=2)
+        cipher = _make_cipher()
+        if cipher is not None:
+            payload = _encrypt_text(payload, cipher)  # 密钥可用 → 密文落盘
+        else:
+            logger.warning("[storage] accounts.json 将以明文保存（无可用密钥）")
+        self._file.write_text(payload)
+        # 敏感凭据：收紧到 0600（wechat-claw 补丁；默认 umask 644 可被本机其他用户读取）
+        try:
+            self._file.chmod(0o600)
+        except OSError:
+            pass''',
+        "_decrypt_text",
+        "⑩ storage.py _load/_save 加密读写 + 旧明文兼容",
+    ),
 ]
 
 

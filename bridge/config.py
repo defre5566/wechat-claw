@@ -52,6 +52,11 @@ def _default_data_root() -> Path:
 DATA_ROOT = Path(_os.environ.get("WC_DATA_ROOT")
                   or (_default_data_root() if _FROZEN else PROJECT_ROOT))
 
+# 模块源签名公钥（Ed25519，作者私钥签名 manifest.sig；空 = 未启用签名校验，
+# 发布前保持；发布时经 scripts/gen_signing_key.py 生成并填入）——防源仓库账号被盗
+# 时恶意模块自动进入部署机（账号被盗者无私钥签不出合法包）
+SIGNING_PUBLIC_KEY: str = ""
+
 # 运行时根 = 数据根：模块系统（registry/register/module_source/scheduler/jobs/permissions）
 # 与 bridge 工作区（logs/inbox/_archive/agent-SDK/状态文件）统一以 WORK_ROOT 定位——
 # 打包形态下 __file__ 指向只读临时解包目录，落盘必须走数据根，否则重启即丢。
@@ -62,6 +67,8 @@ CONFIG_FILE = WORK_ROOT / ".config" / "config.yaml"
 # 微信 SDK 存储（accounts.json 等）收敛到数据根：SDK 已打补丁支持该环境变量重定向
 # （vendor 快照 + site-packages 双形态都经 apply_patches 打上；未打时回落 ~/.wechat-agent-sdk）
 _os.environ.setdefault("WECHAT_AGENT_SDK_STATE_DIR", str(WORK_ROOT / "agent-SDK"))
+# SDK 存储加密密钥（modules/common/crypto.py 同名 32B 主密钥；SDK 已打补丁支持该 env）
+_os.environ.setdefault("WECHAT_AGENT_SDK_KEY_FILE", str(WORK_ROOT / ".config" / "crypto.key"))
 
 # ---- 运行参数（bridge 内置，不可被配置文件覆盖）----
 DEFAULTS_RUNTIME: dict = {
@@ -99,8 +106,9 @@ DEFAULTS_USER: dict = {
             "~/文档", "~/下载", "~/桌面", "~/图片",
             "~/音乐", "~/视频", "~/公共", "inbox",   # inbox = <数据根>/inbox
         ],
-        "reject_dirs": [".config", "~/.ssh", "~/.gnupg"],  # .config = <数据根>/.config
-        "reject_name_re": "token|secret|credential|private|anniversaries\\.json\\.enc",
+        "reject_dirs": [".config", "agent-SDK", "~/.wechat-agent-sdk",
+                        "~/.ssh", "~/.gnupg"],  # .config = <数据根>/.config；agent-SDK = <数据根> 下微信 SDK 凭证目录
+        "reject_name_re": "token|secret|credential|private|accounts\\.json|anniversaries\\.json\\.enc",
         "reject_suffixes": [".key", ".pem", ".p12", ".pfx", ".p8"],
     },
     "crypto": {

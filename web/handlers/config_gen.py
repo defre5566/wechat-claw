@@ -62,10 +62,48 @@ def _gen_opencode_config() -> dict:
         return {"ok": False, "error": str(e)}
 
 
+# 信任模型声明（部署机数据根存档，供用户查阅；不入仓库 docs/）
+_TRUST_NOTICE = """# 模块源信任模型声明
+
+本机通过「模块更新」功能每日自动拉取模块库并安装/更新模块。请知悉以下信任模型：
+
+## 模块库性质
+- 「官方模块库」为**作者个人维护**的 GitHub 仓库（wechat-claw_modules_official），
+  并非机构运营的官方渠道。安装与自动更新即代表你信任作者及其账号安全。
+- 「自定义源」为第三方地址，风险自担；管理后台安装时会提示「只装信任来源」。
+
+## 校验机制
+- 传输校验：模块包 sha256 与 manifest 比对（防传输损坏）。
+- 签名校验：builtin 源启用了 Ed25519 签名（manifest.sig）后，manifest 变化必须
+  通过内置公钥验证；验证失败将**拒绝更新**并告警（防源仓库被攻破后恶意分发）。
+- 签名公钥（若已配置）：{pubkey}
+
+## 建议
+- 不需要自动更新可在配置中关闭「模块自动更新」。
+- 本文件为部署存档副本，程序升级可覆盖；数据在 <数据根>/.config/trust/。
+"""
+
+
+def _gen_trust_notice() -> dict:
+    """数据根 .config/trust/TRUST-NOTICE.md：信任模型存档（幂等覆盖，供用户查阅）。"""
+    try:
+        from bridge.config import SIGNING_PUBLIC_KEY
+        pub = str(SIGNING_PUBLIC_KEY or "").strip() or "（未启用）"
+        target_dir = DATA_ROOT / ".config" / "trust"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "TRUST-NOTICE.md").write_text(
+            _TRUST_NOTICE.format(pubkey=pub), encoding="utf-8"
+        )
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 def handle(app, body: dict | None = None) -> dict:
     body = body or {}
     results = {"config": _gen_config(), "key": _gen_key(),
-               "opencode": _gen_opencode_config()}
+               "opencode": _gen_opencode_config(),
+               "trust_notice": _gen_trust_notice()}
 
     # 管理密码：首次必填（开放期仅限向导完成前；已存在则可跳过）
     password = body.get("password", "")

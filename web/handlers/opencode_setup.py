@@ -22,6 +22,8 @@ SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 # 官方默认安装目录（install 脚本 INSTALL_DIR；Windows 同名）
 _INSTALL_DIR = os.path.expanduser("~/.opencode/bin")
 _DOC_URL = "https://opencode.ai/docs/install"
+# 已知风险（如实声明）：curl|bash 无 checksum 校验（官方脚本动态逻辑无法固定摘要），
+# 信任 https://opencode.ai/install 脚本本身；对供应链敏感者可手动安装后点「重新检测」
 _POSIX_CMD = "curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path"
 # Windows：官方 release zip（x64），下载解压即可，无管道执行远程脚本
 _WIN_ZIP_URL = "https://github.com/anomalyco/opencode/releases/latest/download/opencode-windows-x64.zip"
