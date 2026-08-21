@@ -22,17 +22,20 @@ DATA_ROOT = MODULES_DIR / "modules_data"
 CONFIG_DIR = WORK_ROOT / ".config"
 PERMS_FILE = CONFIG_DIR / "module-permissions.json"
 
-# 测试隔离点
-if os.environ.get("OPENCODE_PERMS_ROOT"):
-    MODULES_DIR = Path(os.environ["OPENCODE_PERMS_ROOT"]) / "modules"
-    DATA_ROOT = MODULES_DIR / "modules_data"
-    CONFIG_DIR = Path(os.environ["OPENCODE_PERMS_ROOT"]) / ".config"
-    PERMS_FILE = CONFIG_DIR / "module-permissions.json"
+
+def _paths() -> tuple[Path, Path]:
+    """运行时路径（调用时求值）：OPENCODE_PERMS_ROOT 测试隔离优先，避免污染真实数据根。"""
+    root = os.environ.get("OPENCODE_PERMS_ROOT")
+    if root:
+        root = Path(root)
+        return root / "modules" / "modules_data", root / ".config"
+    return DATA_ROOT, CONFIG_DIR
 
 
 def module_data_dir(name: str) -> Path:
     """模块用户数据目录 modules/modules_data/<name>/。"""
-    return DATA_ROOT / name
+    data_root, _ = _paths()
+    return data_root / name
 
 
 def _load_json(path: Path) -> dict | None:
@@ -75,9 +78,11 @@ def collect_permissions() -> dict:
     返回 {"edit": {<绝对路径>: "allow"}, "write": {<绝对路径>: "allow"}}。
     """
     perms: dict[str, dict[str, str]] = {"edit": {}, "write": {}}
-    if not MODULES_DIR.is_dir():
+    data_root, _ = _paths()
+    mods_dir = data_root.parent  # modules_data 的上级 = 模块代码根
+    if not mods_dir.is_dir():
         return perms
-    for mod_dir in sorted(MODULES_DIR.iterdir()):
+    for mod_dir in sorted(mods_dir.iterdir()):
         mj = mod_dir / "module.json"
         if not mj.is_file():
             continue
@@ -109,10 +114,11 @@ def apply_permissions(perms: dict | None = None) -> bool:
     """写 .config/module-permissions.json（opencode 权限片段）。"""
     perms = perms if perms is not None else collect_permissions()
     try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        tmp = PERMS_FILE.with_name(PERMS_FILE.name + ".tmp")
+        _, config_dir = _paths()
+        config_dir.mkdir(parents=True, exist_ok=True)
+        tmp = config_dir / "module-permissions.json.tmp"
         tmp.write_text(json.dumps(perms, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(PERMS_FILE)  # 原子写
+        tmp.replace(config_dir / "module-permissions.json")  # 原子写
         return True
     except OSError:
         return False

@@ -59,9 +59,13 @@ def main() -> int:
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     from bridge.config import DATA_ROOT as PROD_DATA_ROOT
+    # 部署标志 = .config 下的 config.yaml / crypto.key（测试/CI 可能产生 module-permissions.json
+    # 等零散文件，不能作为"已部署"判断依据）
+    def _deployed(data_root) -> bool:
+        cfg = data_root / ".config"
+        return (cfg / "config.yaml").is_file() or (cfg / "crypto.key").is_file()
     # 兼容旧版部署：数据根可能还在项目根 .config（迁移不做，但误跑清理会丢数据）
-    legacy_config = (ROOT / ".config").exists()
-    existing_config = (PROD_DATA_ROOT / ".config").exists() or legacy_config
+    existing_config = _deployed(PROD_DATA_ROOT) or _deployed(ROOT)
     if existing_config and os.environ.get("WC_SELFTEST_FORCE") != "1":
         print(f"NG: 检测到已存在的数据根 {PROD_DATA_ROOT}（疑似已部署实例）。")
         print("    selftest 会清理测试数据，在真实部署上误跑会永久丢失 crypto.key/密码/用户数据。")
