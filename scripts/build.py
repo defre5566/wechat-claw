@@ -14,6 +14,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Windows 控制台默认 cp1252，中文 print 会 UnicodeEncodeError（CI pwsh 管道下必现）
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "scripts" / "wechat-claw.spec"
 VENV_PY = ROOT / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")

@@ -17,7 +17,7 @@ jobs:
           - os: ubuntu-latest
             suffix: linux-x64
           - os: macos-latest
-            suffix: macos-x64
+            suffix: macos-arm64
           - os: windows-latest
             suffix: windows-x64
     runs-on: ${{ matrix.os }}
@@ -26,17 +26,29 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Setup venv
+        run: python -m venv .venv
       - name: Install deps
-        run: pip install -r requirements.txt
-      - name: Install vendored SDK (editable)
-        run: pip install -e ./vendor/wechat_agent_sdk
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=.venv/Scripts/python.exe; else PY=.venv/bin/python; fi
+          "$PY" -m pip install -r requirements.txt
+          "$PY" -m pip install -e ./vendor/wechat_agent_sdk
       - name: Tests
-        run: pytest tests/ -q
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=.venv/Scripts/python.exe; else PY=.venv/bin/python; fi
+          "$PY" -m pytest tests/ -q
       - name: Build
-        run: python scripts/build.py
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=.venv/Scripts/python.exe; else PY=.venv/bin/python; fi
+          "$PY" scripts/build.py
       - name: Smoke test (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
+        env:
+          WEB_SELFTEST: "1"
         run: |
           dist/wechat-claw &
           PID=$!
@@ -48,6 +60,8 @@ jobs:
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          WEB_SELFTEST: "1"
         run: |
           $p = Start-Process -FilePath "dist\wechat-claw.exe" -PassThru
           for ($i = 0; $i -lt 20; $i++) {
