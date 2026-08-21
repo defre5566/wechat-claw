@@ -25,7 +25,7 @@ from bridge.config import DATA_ROOT, DEPLOY_ROOT, RESOURCE_ROOT
 
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 WEB_PORT = 8650
-VERSION = "0.1.0"
+VERSION = "0.1.2"
 
 
 def _write_and_run(path: Path, content: str, commands: list[list[str]]) -> list[dict]:

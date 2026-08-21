@@ -1,6 +1,6 @@
 [project]
 name = "wechat-claw"
-version = "0.1.1"
+version = "0.1.2"
 description = "微信主动推送体系：iLink 直连 + opencode 对话 agent（微信可主动关心、可干活）"
 readme = "README.md"
 requires-python = ">=3.11"
