@@ -39,3 +39,6 @@ modules/modules_data/*
 
 # 模块源工作区（独立仓库 wechat-claw_modules_official，避免嵌套仓库）
 wechat-claw_modules_official/
+
+# 开发日志（不入库不推送）
+devlog/

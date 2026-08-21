@@ -58,6 +58,24 @@ def _setup_file_logging() -> None:
     log.addHandler(handler)
 
 
+# 待发队列上限（网络故障期防内存无界；满则丢弃新条目并告警）
+RETRY_QUEUE_LIMIT = 1000
+
+
+def spawn_task(coro, name: str):
+    """创建后台任务并挂监护：异常死亡 → 明确日志（防静默消失），返回 task。"""
+    task = asyncio.create_task(coro)
+
+    def _done(t: asyncio.Task):
+        if t.cancelled():
+            log.warning("[task] %s 已取消", name)
+        elif t.exception() is not None:
+            log.error("[task] %s 异常退出: %s", name, t.exception())
+
+    task.add_done_callback(_done)
+    return task
+
+
 _setup_file_logging()
 
 INBOX_DIR = WORK_ROOT / "inbox"
@@ -82,6 +100,9 @@ class BridgeCore:
             return True
         except Exception as e:
             log.error(f"[push] 发送失败，入待发队列: {e}")
+            if len(self.retry_queue) >= RETRY_QUEUE_LIMIT:
+                log.warning(f"[push] 待发队列已满（{RETRY_QUEUE_LIMIT}），本条放弃: conv={conversation_id}")
+                return False
             self.retry_queue.append([conversation_id, text])
             from .state import save_retry_queue
             save_retry_queue(self.retry_queue)
@@ -157,7 +178,11 @@ class BridgeCore:
         return " ".join(notes)
 
     async def _agent_process(self, text: str) -> None:
-        """agent 类推送：取 agent 加工后发送到目标会话。"""
+        """agent 类推送：取 agent 加工后发送到目标会话。
+
+        会话窗接入：目标会话已过期 → 归档并刷新活跃点，推送内容作为新会话首条
+        上下文（附提示），用户后续回复可直接接续（不再误报"超时开新会话"）。
+        """
         from .state import target_conversation_ids
         convs = target_conversation_ids()
         if not convs:
@@ -165,6 +190,11 @@ class BridgeCore:
             return
         for conv in convs:
             try:
+                expired = self.sessions.check(conv) == "expired"
+                if expired:
+                    await self.send_text(
+                        conv, "（上一轮会话已超时归档，本轮推送已开启新会话，可直接回复继续）"
+                    )
                 async with self._conv_locks.setdefault(conv, asyncio.Lock()):
                     reply = await self._agent.chat(ChatRequest(conversation_id=conv, text=text))
                     out = reply.text if hasattr(reply, "text") else str(reply)
@@ -177,16 +207,18 @@ class BridgeCore:
                 log.error(f"[push] agent 加工失败: {e}")
 
     async def push_worker(self) -> None:
-        """消费外部推送：direct/agent 走串行区，file 类不占串行区（gate 确认不阻塞推送）。"""
+        """消费外部推送：direct 走发送串行锁（防微信限流）；agent 按会话并行（per-conv
+        锁防同会话交叉），不再占用全局锁阻塞其他会话的入站消息；file 类不占串行区。
+        """
         while True:
             item = await self.push_queue.get()
             ptype = item.get("type")
             try:
                 if ptype == "file":
-                    # 文件发送含 gate 确认（最长 30s），不占 semaphore，避免阻塞 direct/agent
+                    # 文件发送含 gate 确认（最长 30s），不占 send_lock，避免阻塞 direct
                     await self._send_file(item.get("path", ""))
                 elif ptype in PUSH_DIRECT_TYPES:
-                    async with self.semaphore:
+                    async with self.send_lock:
                         from .state import targets_for_text
                         text = item.get("text", "")
                         conv, text = targets_for_text(text)
@@ -195,17 +227,16 @@ class BridgeCore:
                         else:
                             log.warning("[push] 无目标会话，跳过 direct 推送（不入重试队列）")
                 elif ptype in PUSH_AGENT_TYPES:
-                    async with self.semaphore:
-                        await self._agent_process(item.get("text", ""))
+                    await self._agent_process(item.get("text", ""))
             except Exception as e:
                 log.error(f"[push] 处理失败: {e}")
             self.push_queue.task_done()
 
     async def retry_worker(self) -> None:
-        """周期重试待发队列，成功后移除。"""
+        """周期重试待发队列，成功后移除（间隔读 push.retry_worker_interval，内置不可覆盖）。"""
         from .state import load_retry_queue, RETRY_FILE  # noqa: F401
         from .state import save_retry_queue
-        interval = 300
+        interval = int(get_cfg("push.retry_worker_interval") or 300)
         while True:
             await asyncio.sleep(interval)
             if not self.retry_queue:
@@ -332,7 +363,7 @@ class BridgeCore:
         self.sessions = SessionManager(agent=self._agent)
         await self._agent.on_start()
 
-        self.semaphore = asyncio.Semaphore(1)  # 串行
+        self.send_lock = asyncio.Lock()  # 仅 direct 直发串行（防微信 API 限流）；agent/入站不占
 
         # ---- 主动推送 ----
         self.retry_queue = load_retry_queue()
@@ -340,9 +371,9 @@ class BridgeCore:
         self.gate = gate
 
         httpd = start_push_server(self.push_queue)
-        asyncio.create_task(self.push_worker())
-        asyncio.create_task(self.retry_worker())
-        asyncio.create_task(scheduler())
+        spawn_task(self.push_worker(), "push_worker")
+        spawn_task(self.retry_worker(), "retry_worker")
+        spawn_task(scheduler(), "scheduler")
         from .state import TOKEN_FILE
         log.info(
             f"[push] HTTP 入口 http://{PUSH_HOST}:{PUSH_PORT}/push"
@@ -366,9 +397,8 @@ class BridgeCore:
                 if await gate.resolve(conv, text):
                     log.info(f"[权限] {conv} 回复: {text!r}")
                     continue
-            async with self.semaphore:
-                lock = self._conv_locks.setdefault(conv, asyncio.Lock())
-                asyncio.create_task(self._handle_serial(lock, conv, text))
+            lock = self._conv_locks.setdefault(conv, asyncio.Lock())
+            asyncio.create_task(self._handle_serial(lock, conv, text))
 
 
     async def _handle_serial(self, lock: asyncio.Lock, conversation_id: str, text: str) -> None:

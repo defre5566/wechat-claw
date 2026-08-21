@@ -1,7 +1,7 @@
 """通用加解密（AES-GCM 主密钥版）。
 
-密钥：路径可配（config.yaml crypto.key_file，默认 <项目根>/.config/crypto.key，
-相对项目根解析，自动生成，chmod 600；已配置 opencode deny 读取）。
+密钥：路径可配（config.yaml crypto.key_file，默认 <数据根>/.config/crypto.key，
+相对数据根解析，自动生成，chmod 600；已配置 opencode deny 读取）。
 密文头带版本字段 v1，为将来密钥轮换预留。仅用于隐私数据（如纪念日/生日）。
 """
 from __future__ import annotations

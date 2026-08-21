@@ -484,9 +484,14 @@ def module_update(app, body: dict | None = None) -> dict:
         retry_set="retry" in body,
         settings=clean,
     )
-    if ok:
-        return {"ok": True}
-    return {"ok": False, "error": f"模块 {name} 不存在或保存失败"}, 400
+    if not ok:
+        return {"ok": False, "error": f"模块 {name} 不存在或保存失败"}, 400
+    # job 自动登记失败带到响应（前端提示；成功保存但登记失败不算 400）
+    from modules.register import take_job_error
+    job_err = take_job_error(name)
+    if job_err:
+        return {"ok": True, "job_error": f"设置已保存，但 agent 任务登记失败：{job_err}"}
+    return {"ok": True}
 
 
 def modules_toggle(app, body: dict | None = None) -> dict:

@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import json
 
-from bridge.config import DEPLOY_ROOT
+from bridge.config import WORK_ROOT
 
-CONFIG_DIR = DEPLOY_ROOT / ".config"
+# 全配置面同根：密码/密钥/权限/配置统一 <数据根>/.config（打包形态随平台用户目录，
+# 不再落 exe 旁——升级换目录不丢数据，且受 file_send reject_dirs ".config" 拒发保护）
+CONFIG_DIR = WORK_ROOT / ".config"
 
 
 def _path(name: str) -> Path:

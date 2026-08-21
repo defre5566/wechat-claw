@@ -86,6 +86,15 @@ def _merge_settings(name: str, **updates) -> bool:
 
 # ---------- installed.json（版本/来源记录，安装器写） ----------
 
+# 最近一次 job 联动错误（web 保存设置后取走回传，用户可见；键=模块名）
+_job_sync_errors: dict[str, str] = {}
+
+
+def take_job_error(name: str) -> str | None:
+    """取走并清空模块最近一次 job 登记错误（无则 None）。"""
+    return _job_sync_errors.pop(name, None)
+
+
 def refresh_module_config(name: str) -> None:
     """更新/恢复后联动：调度 cron 重算 + agent job 重登记 + 设置驱动豁免 + 索引刷新。"""
     if not module_exists(name):
@@ -96,6 +105,7 @@ def refresh_module_config(name: str) -> None:
     if not rj.get("ok"):
         from modules.common.log import log_event
         log_event("WARN", name, "job_sync_fail", rj.get("error", "job 联动失败"))
+        _job_sync_errors[name] = rj.get("error", "job 联动失败")
     from bridge.permissions import refresh_permissions
     refresh_permissions()
     from modules.registry_index import invalidate
@@ -304,6 +314,7 @@ def update_module(
             if not rj.get("ok"):
                 from modules.common.log import log_event
                 log_event("WARN", name, "job_sync_fail", rj.get("error", "job 联动失败"))
+                _job_sync_errors[name] = rj.get("error", "job 联动失败")
             from bridge.permissions import refresh_permissions
             refresh_permissions()  # 设置驱动豁免（vault_path 自动放行）
     if retry_set:

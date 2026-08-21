@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -16,6 +17,8 @@ import sys
 import time
 from datetime import date, timedelta
 from pathlib import Path
+
+log = logging.getLogger("wechat-bridge")
 
 from .config import get as get_cfg
 from bridge.config import WORK_ROOT
@@ -39,7 +42,7 @@ def _load_json_file(path: Path) -> dict:
         if path.is_file():
             return json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
-        print(f"[state] 读文件失败 {path}: {e}", file=sys.stderr)
+        log.warning("[state] 读文件失败 %s: %s", path, e)
     return {}
 
 
@@ -52,7 +55,7 @@ def _save_json_file(path: Path, data: dict) -> bool:
         os.replace(tmp, path)
         return True
     except Exception as e:
-        print(f"[state] 写文件失败 {path}: {e}", file=sys.stderr)
+        log.warning("[state] 写文件失败 %s: %s", path, e)
         try:
             tmp.unlink(missing_ok=True)
         except Exception:
@@ -123,7 +126,7 @@ def load_or_create_token() -> str:
     fd = os.open(str(TOKEN_FILE), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(tok)
-    print(f"[push] 已生成新 token: {TOKEN_FILE}")
+    log.info("[push] 已生成新 token: %s", TOKEN_FILE)
     return tok
 
 
@@ -134,7 +137,7 @@ def load_retry_queue() -> list[list[str]]:
             data = json.loads(RETRY_FILE.read_text())
             return [list(x) for x in data if isinstance(x, (list, tuple)) and len(x) >= 2]
     except Exception as e:
-        print(f"[push] 读取待发队列失败: {e}", file=sys.stderr)
+        log.warning("[push] 读取待发队列失败: %s", e)
     return []
 
 
@@ -143,7 +146,7 @@ def save_retry_queue(items: list[list[str]]) -> None:
         SDK_DIR.mkdir(parents=True, exist_ok=True)
         RETRY_FILE.write_text(json.dumps(items))
     except Exception as e:
-        print(f"[push] 保存待发队列失败: {e}", file=sys.stderr)
+        log.warning("[push] 保存待发队列失败: %s", e)
 
 
 def load_sched_state() -> dict:
@@ -151,14 +154,14 @@ def load_sched_state() -> dict:
         if SCHED_STATE_FILE.is_file():
             return json.loads(SCHED_STATE_FILE.read_text())
     except Exception as e:
-        print(f"[sched] 读取状态失败: {e}", file=sys.stderr)
+        log.warning("[sched] 读取状态失败: %s", e)
     return {}
 
 
 def save_sched_state(state: dict) -> None:
     """落盘调度状态（H3：走 _save_json_file 原子写，防半写损坏）。"""
     if not _save_json_file(SCHED_STATE_FILE, state):
-        print(f"[sched] 保存状态失败", file=sys.stderr)
+        log.warning("[sched] 保存状态失败")
 
 
 def target_conversation_ids() -> list[str]:
@@ -169,7 +172,7 @@ def target_conversation_ids() -> list[str]:
             if isinstance(data, dict):
                 return [k for k in data if isinstance(k, str) and k]
     except Exception as e:
-        print(f"[push] 读取会话状态失败: {e}", file=sys.stderr)
+        log.warning("[push] 读取会话状态失败: %s", e)
     return []
 
 

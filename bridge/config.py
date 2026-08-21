@@ -12,11 +12,15 @@
 """
 from __future__ import annotations
 
+import logging
 import os as _os
+import shutil as _shutil
 import sys as _sys
 from pathlib import Path
 
 import yaml
+
+log = logging.getLogger("wechat-config")
 
 # ---- 部署根 / 数据根 / 资源根（打包形态适配）----
 # PyInstaller onefile 打包后：__file__ 在临时解包目录（_MEIPASS），
@@ -67,6 +71,7 @@ DEFAULTS_RUNTIME: dict = {
         "max_body_mb": 100,
         "retry_attempts": 3,
         "retry_interval": 3,
+        "retry_worker_interval": 300,   # bridge→微信 发送失败兜底重试间隔（与模块推送 retry_* 语义区分）
         "timeout": 15,
     },
     "session": {
@@ -126,13 +131,21 @@ def _load() -> dict:
     if _cached is not None:
         return _cached
     cfg: dict = {}
+    fail_msg = None
     try:
         if CONFIG_FILE.is_file():
             data = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
             if isinstance(data, dict):
                 cfg = data
-    except Exception:
-        cfg = {}
+            else:
+                fail_msg = f"内容不是映射（{type(data).__name__}），请检查格式"
+    except Exception as e:
+        fail_msg = str(e)
+    if fail_msg:
+        log.warning(
+            "config.yaml 解析失败，用户配置（acp.command/file_send/crypto）回退默认值: %s",
+            fail_msg,
+        )
     # 只合并用户段键（文件里写运行参数段 = 无效，防止覆盖内置）
     user_cfg = {k: v for k, v in cfg.items() if k in DEFAULTS_USER}
     user = _merge(DEFAULTS_USER, user_cfg)
@@ -166,3 +179,49 @@ def reset_cache() -> None:
     """清缓存（测试用；运行期配置只读不重载）。"""
     global _cached
     _cached = None
+
+
+def opencode_converged() -> Path | None:
+    """opencode 收敛判定：向导安装（标记存在）→ 配置收敛根，否则 None。
+
+    收敛根 = DATA_ROOT/opencode/config（会话/任务子进程经 XDG_CONFIG_HOME 注入，
+    opencode 配置、scheduler 数据与主链路同域）。
+    """
+    marker = DATA_ROOT / ".config" / "opencode-installed.json"
+    if marker.is_file():
+        return DATA_ROOT / "opencode" / "config"
+    return None
+
+
+def xdg_env() -> dict:
+    """收敛形态的 XDG 重定向环境（空 dict = 不收敛，保持 opencode 默认位置）。"""
+    root = opencode_converged()
+    if root is None:
+        return {}
+    base = root.parent  # DATA_ROOT/opencode
+    return {
+        "XDG_DATA_HOME": str(base / "data"),
+        "XDG_CONFIG_HOME": str(root),
+        "XDG_CACHE_HOME": str(base / "cache"),
+    }
+
+
+def resolve_opencode() -> str | None:
+    """opencode 可执行文件解析（job 登记/单元生成与主链路 acp.command 同源寻址）。
+
+    优先级：acp.command 显式配置（绝对路径校验，无效即失败）→ PATH → 官方默认
+    安装目录 ~/.opencode/bin。找不到返回 None（调用方明确报错并回滚）。
+    """
+    cmd = str(get("acp.command") or "").strip()
+    if cmd and ("/" in cmd or "\\" in cmd):
+        p = Path(cmd).expanduser()
+        if p.is_file() and _os.access(p, _os.X_OK):
+            return str(p)
+        return None
+    found = _shutil.which(cmd or "opencode")
+    if found:
+        return found
+    fallback = Path.home() / ".opencode" / "bin" / "opencode"
+    if fallback.is_file() and _os.access(fallback, _os.X_OK):
+        return str(fallback)
+    return None
