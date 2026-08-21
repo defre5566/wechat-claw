@@ -46,6 +46,18 @@ CONFIG_SCHEMA: list[dict] = [
              "hint": "只读：密钥自动生成，丢失将无法解密已加密的隐私数据"},
         ],
     },
+    {
+        "group": "update",
+        "title": "模块自动更新",
+        "fields": [
+            {"key": "auto_enabled", "label": "自动更新", "type": "boolean",
+             "default": True,
+             "hint": "开启后每天定时检查模块源：源有变化即自动更新已装模块（静默，不推送）；模块级开关可单独关闭"},
+            {"key": "check_time", "label": "检查时刻", "type": "text",
+             "default": "04:00",
+             "hint": "每日检查时刻（HH:MM）；源无变化时零开销跳过"},
+        ],
+    },
 ]
 
 

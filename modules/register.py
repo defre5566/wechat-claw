@@ -61,7 +61,7 @@ def _load_settings_json(name: str) -> dict:
 
 
 def _save_settings_json(name: str, settings: dict) -> bool:
-    """原子写数据区 settings.json。"""
+    """原子写数据区 settings.json（部署状态 enabled/retry/auto_update + 业务设置统一落盘）。"""
     try:
         dd = module_data_dir(name)
         dd.mkdir(parents=True, exist_ok=True)
@@ -72,6 +72,79 @@ def _save_settings_json(name: str, settings: dict) -> bool:
         return True
     except OSError:
         return False
+
+
+def _merge_settings(name: str, **updates) -> bool:
+    """合并写 settings.json（只更新给定键，保留其他部署状态/业务设置）。"""
+    data = _load_settings_json(name)
+    data.update(updates)
+    return _save_settings_json(name, data)
+
+
+# ---------- installed.json（版本/来源记录，安装器写） ----------
+
+def refresh_module_config(name: str) -> None:
+    """更新/恢复后联动：调度 cron 重算 + agent job 重登记 + 设置驱动豁免 + 索引刷新。"""
+    if not module_exists(name):
+        return
+    _sync_schedule_from_settings(name)
+    from bridge.jobs import sync_module_jobs
+    rj = sync_module_jobs(name)
+    if not rj.get("ok"):
+        from modules.common.log import log_event
+        log_event("WARN", name, "job_sync_fail", rj.get("error", "job 联动失败"))
+    from bridge.permissions import refresh_permissions
+    refresh_permissions()
+    from modules.registry_index import invalidate
+    invalidate()
+
+
+def get_module_state(name: str) -> dict:
+    """读 installed.json（部署版本记录）：{version, installed_at, source_id}。"""
+    sf = module_data_dir(name) / "installed.json"
+    if sf.is_file():
+        try:
+            data = json.loads(sf.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    return {}
+
+
+def save_module_state(name: str, version: str = "", source_id: str = "", installed_at: str = "") -> bool:
+    """写 installed.json（安装/更新后记录版本与来源）。"""
+    import datetime
+    data = get_module_state(name)
+    if version:
+        data["version"] = str(version)
+    if source_id:
+        data["source_id"] = str(source_id)
+    data["installed_at"] = installed_at or datetime.datetime.now().isoformat(timespec="seconds")
+    try:
+        dd = module_data_dir(name)
+        dd.mkdir(parents=True, exist_ok=True)
+        sf = dd / "installed.json"
+        tmp = sf.with_name(sf.name + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(sf)
+        return True
+    except OSError:
+        return False
+
+
+# ---------- 部署状态（settings.json 统一管理） ----------
+
+def get_auto_update(name: str) -> bool:
+    """模块级自动更新开关（settings.json；缺省 True 跟随全局）。"""
+    return bool(_load_settings_json(name).get("auto_update", True))
+
+
+def set_auto_update(name: str, on: bool) -> bool:
+    """模块级自动更新开关（写 settings.json，不动其他键）。"""
+    if not module_exists(name):
+        return False
+    return _merge_settings(name, auto_update=bool(on))
 
 
 # ---------- schedule_from_settings 联动（设置时间字段 → 调度 cron） ----------
@@ -165,15 +238,23 @@ def register_module(
         "name": name,
         "purpose": purpose,
         "spec": spec,
-        "enabled": False,  # 新注册默认关闭，手动启用后才运行
     })
     if schedule is not None:
         data["schedule"] = schedule
-    if retry is not None:
-        data["retry"] = retry
     data.setdefault("schedule", [])
-    data.setdefault("retry", None)
+    # 部署状态（enabled/retry/auto_update）进数据区 settings.json：
+    # 安装时从 module.json 静态声明复制 retry 默认（若有），enabled 默认关闭，auto_update 默认开
+    init_settings = {
+        "enabled": False,
+        "auto_update": True,
+    }
+    if retry is not None:  # CLI --retry-json 显式传入优先
+        init_settings["retry"] = retry
+    elif "retry" in data:
+        init_settings["retry"] = data["retry"]
+        del data["retry"]  # retry 归部署状态，module.json 不再承载
     ok = _save_module_json(name, data)
+    ok = _save_settings_json(name, init_settings) and ok
     if ok:
         from modules.registry_index import invalidate
         invalidate()  # H2：注册后清索引缓存，下个 build_index 立即生效
@@ -189,11 +270,13 @@ def update_module(
     retry_set: bool = False,
     settings: dict | None = None,
 ) -> bool:
-    """保留字段式更新 module.json（已存在模块改配置；不碰 token/enabled，G1）。
+    """保留字段式更新（已存在模块改配置；不碰 token，G1）。
 
-    settings：模块设置（settings_schema 对应的当前值），仅显式传入时更新；
-             值存数据区 modules_data/<name>/settings.json（module.json 只留声明，升级不丢），
-             保存后刷新豁免（settings 中 type=path 字段自动豁免，如 Obsidian vault_path）。
+    - purpose/spec/schedule：module.json（声明/联动产物）
+    - retry：数据区 settings.json（部署状态，web 弹窗可配）
+    - settings：业务设置（settings_schema 对应值），合并写 settings.json——
+      **保留部署状态键（enabled/retry/auto_update），不被业务设置覆盖**；
+      保存后联动调度 cron + agent job + 设置驱动豁免。
     """
     if not module_exists(name):
         return False
@@ -204,11 +287,12 @@ def update_module(
         data["spec"] = spec
     if schedule is not None:
         data["schedule"] = schedule
-    if retry_set:
-        data["retry"] = retry
     ok = _save_module_json(name, data)
     if settings is not None:
-        ok_s = _save_settings_json(name, settings)
+        cur = _load_settings_json(name)
+        merged = dict(cur)
+        merged.update(settings)  # 部署状态键不在业务设置内，天然保留
+        ok_s = _save_settings_json(name, merged)
         ok = ok and ok_s
         if ok_s:
             _sync_schedule_from_settings(name)  # 时间设置 → 调度 cron 联动
@@ -219,6 +303,8 @@ def update_module(
                 log_event("WARN", name, "job_sync_fail", rj.get("error", "job 联动失败"))
             from bridge.permissions import refresh_permissions
             refresh_permissions()  # 设置驱动豁免（vault_path 自动放行）
+    if retry_set:
+        ok = _merge_settings(name, retry=retry) and ok
     if ok:
         from modules.registry_index import invalidate
         invalidate()  # H2：更新后清索引缓存
@@ -226,12 +312,10 @@ def update_module(
 
 
 def set_enabled(name: str, enabled: bool) -> bool:
-    """唯一启停入口：写 module.json 的 enabled 字段。"""
+    """唯一启停入口：写数据区 settings.json 的 enabled（module.json 不再承载部署状态）。"""
     if not module_exists(name):
         return False
-    data = _load_module_json(name)
-    data["enabled"] = bool(enabled)
-    ok = _save_module_json(name, data)
+    ok = _merge_settings(name, enabled=bool(enabled))
     if ok:
         if not enabled:
             from bridge.jobs import unregister_jobs
@@ -242,17 +326,20 @@ def set_enabled(name: str, enabled: bool) -> bool:
 
 
 def get_module(name: str) -> dict | None:
-    """读单个模块配置（含 enabled 与 settings 值；不存在返回 None）。
+    """读单个模块配置（含 enabled/retry/settings 值；不存在返回 None）。
 
-    settings 值从数据区 settings.json 读（module.json 只留声明）。
+    部署状态（enabled/retry/auto_update）从数据区 settings.json 读；
+    settings 值同源（业务键）；module.json 只留声明与调度产物。
     """
     if not module_exists(name):
         return None
     data = _load_module_json(name)
-    data["enabled"] = bool(data.get("enabled", False))
     sv = _load_settings_json(name)
-    if sv:
-        data["settings"] = sv
+    data["enabled"] = bool(sv.get("enabled", False))
+    data["retry"] = sv.get("retry")
+    data["auto_update"] = bool(sv.get("auto_update", True))
+    data["settings"] = sv
+    data["version"] = str(get_module_state(name).get("version") or "")
     return data
 
 
@@ -267,12 +354,16 @@ def list_modules() -> list[dict]:
             continue
         name = mod_dir.name
         data = _load_module_json(name)
+        sv = _load_settings_json(name)
+        state = get_module_state(name)
         items.append({
             "name": name,
             "purpose": data.get("purpose", ""),
             "schedule": data.get("schedule", []),
-            "retry": data.get("retry"),
-            "enabled": bool(data.get("enabled", False)),
+            "retry": sv.get("retry"),
+            "enabled": bool(sv.get("enabled", False)),
+            "auto_update": bool(sv.get("auto_update", True)),
+            "version": state.get("version", ""),
         })
     return items
 

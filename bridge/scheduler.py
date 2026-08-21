@@ -194,11 +194,43 @@ def _rule_id(rule: dict, name: str, idx: int) -> str:
     return rule.get("id") or f"{name}|{idx}"
 
 
+_daily_check_date: str = ""  # 上次执行每日更新的日期（进程内去重）
+
+
+async def _daily_update_check(now: datetime) -> None:
+    """每日自动更新检查（指纹驱动，静默）：config update.check_time 时刻触发，一天一次。
+
+    开关：全局 update.auto_enabled（check_updates 内部判断）+ 模块级 auto_update。
+    静默：成功/失败只写日志，不推送。
+    """
+    global _daily_check_date
+    try:
+        hh, mm = str(get_cfg("update.check_time", "04:00")).strip().split(":")
+        target = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+    except Exception:
+        target = now.replace(hour=4, minute=0, second=0, microsecond=0)
+    if _daily_check_date == now.date().isoformat() or now < target:
+        return
+    _daily_check_date = now.date().isoformat()
+    try:
+        from bridge.module_source import check_updates
+        result = await asyncio.to_thread(check_updates)
+        if result.get("updated"):
+            log.info(f"[sched] 模块自动更新完成: {result['updated']}")
+        if result.get("errors"):
+            log.warning(f"[sched] 模块自动更新失败: {result['errors']}")
+        if result.get("skipped"):
+            log.info(f"[sched] 模块自动更新跳过（模块级开关关闭）: {result['skipped']}")
+    except Exception as e:
+        log.error(f"[sched] 模块自动更新检查异常: {e}")
+
+
 async def scheduler() -> None:
     """主循环：启动立即 tick 一次，此后每分钟 tick。_tick 异常被吞（记日志不退出）。"""
     await _tick()
     while True:
         now = datetime.now()
+        await _daily_update_check(now)  # 每日自动更新检查（指纹驱动，静默）
         nxt = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
         await asyncio.sleep(max(1.0, (nxt - now).total_seconds() + 0.5))
         try:

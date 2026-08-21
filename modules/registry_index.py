@@ -59,7 +59,17 @@ def build_index() -> dict:
         except Exception:
             continue
         name = data.get("name") or mod_dir.name
-        if not data.get("enabled", False):
+        # 部署状态（enabled）在数据区 settings.json（module.json 纯声明化后不再承载）
+        enabled = False
+        try:
+            sf = MODULES_DIR / "modules_data" / name / "settings.json"
+            if sf.is_file():
+                sv = json.loads(sf.read_text(encoding="utf-8"))
+                if isinstance(sv, dict):
+                    enabled = bool(sv.get("enabled", False))
+        except Exception:
+            enabled = False
+        if not enabled:
             continue  # 关闭的模块不调度、不认 token
         th = _token_hash(name)
         if th is None:

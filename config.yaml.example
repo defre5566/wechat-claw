@@ -37,3 +37,8 @@ file_send:
 # 隐私数据密钥
 crypto:
   key_file: .config/crypto.key    # 相对项目根，自动生成（chmod 600）
+
+# 模块自动更新（每日指纹驱动，静默；模块级开关在模块设置标题栏）
+update:
+  auto_enabled: true
+  check_time: "04:00"             # 每日检查时刻（HH:MM）；源无变化零开销跳过

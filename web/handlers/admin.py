@@ -399,6 +399,40 @@ def module_prompt_delete(app, body: dict | None = None) -> dict:
         return {"ok": False, "error": str(e)}, 500
 
 
+def module_auto_update(app, body: dict | None = None) -> dict:
+    """模块级自动更新开关（弹窗标题栏胶囊）：写数据区 settings.json（register 管）。"""
+    body = body or {}
+    name = str(body.get("name", "")).strip()
+    on = bool(body.get("on"))
+    from modules.register import set_auto_update
+    if not set_auto_update(name, on):
+        return {"ok": False, "error": "模块不存在"}, 404
+    return {"ok": True}
+
+
+def modules_check_updates(app, body: dict | None = None) -> dict:
+    """手动检查更新（force=True：绕过全局开关）；结果含 updated/skipped/errors。"""
+    from bridge.module_source import check_updates
+    result = check_updates(force=True)
+    return {"ok": True, **result}
+
+
+def module_update_now(app, body: dict | None = None) -> dict:
+    """手动更新单个模块（web 按钮）：从源直接更新（校验 + .bak + 跳 token）。"""
+    body = body or {}
+    name = str(body.get("name", "")).strip()
+    if not name:
+        return {"ok": False, "error": "缺少模块名"}, 400
+    from bridge.module_source import load_sources, update_module_from_source
+    sources = load_sources()
+    for src in sources:
+        if any(m.get("name") == name for m in src.get("modules", []) or []):
+            r = update_module_from_source(sources, src["id"], name)
+            return ({"ok": True, "updated": bool(r.get("updated"))} if r.get("ok")
+                    else {"ok": False, "error": r.get("error", "更新失败")}), (200 if r.get("ok") else 400)
+    return {"ok": False, "error": f"源中没有模块 {name}"}, 404
+
+
 def modules_list(app, body: dict | None = None) -> dict:
     """全量模块列表（含禁用）：register.list_modules（G4：花名册替代排班表）。
 

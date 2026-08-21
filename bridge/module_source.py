@@ -333,7 +333,146 @@ def install_module(sources: list[dict], sid: str, name: str) -> dict:
         save_sources(sources)
         from bridge.permissions import refresh_permissions
         refresh_permissions()
+        # 安装记录版本（installed.json，部署状态数据区）
+        from modules.register import save_module_state
+        save_module_state(name, version=str(entry.get("version") or ""), source_id=sid)
         return {"ok": True, "name": name, "enabled": False}
     finally:
         if tmp_root is not None:
             shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+# ---------- 更新（哈希 + .bak 双保险，不换 token / 不碰数据区） ----------
+
+def update_module_from_source(sources: list[dict], sid: str, name: str) -> dict:
+    """从源更新已装模块（手动按钮 / 每日自动检查共用）。
+
+    流程：拉新包 → 校验①清单 ②结构 ③sha256（不符拒收，保持旧版）
+    → .bak 备份现目录 → 复制（跳过 token，G1 不轮换）→ 失败恢复 .bak
+    → 联动（schedule 重算 + job 重登记 + 豁免）→ 记录新版本。
+
+    与安装的区别：不重新注册（不换 token）、settings.json 全程不碰（部署状态保留）。
+    """
+    src = _find_source(sources, sid)
+    if src is None:
+        return {"ok": False, "error": f"源不存在: {sid}"}
+    if not (MODULES_DIR / name / "module.json").is_file():
+        return {"ok": False, "error": f"模块 {name} 未安装（先安装再更新）"}
+    entry = next((m for m in src.get("modules", []) if m.get("name") == name), None)
+    if entry is None:
+        return {"ok": False, "error": f"源 {src.get('name')} 中没有模块 {name}"}
+
+    tmp_root = None
+    try:
+        if src.get("type") == "local":
+            root = _source_local_dir(src)
+            if root is None:
+                return {"ok": False, "error": f"本地目录不存在: {src.get('url')}"}
+            mod_root = root / name
+        else:
+            tmp_root = Path(tempfile.mkdtemp(prefix="wc-update-"))
+            if not _git_clone(src.get("url", ""), tmp_root):
+                return {"ok": False, "error": f"clone 失败: {src.get('url')}"}
+            mod_root = tmp_root / name
+
+        manifest = _read_manifest(tmp_root if tmp_root else _source_local_dir(src))
+        files = []
+        if manifest:
+            mentry = next((m for m in manifest.get("modules", []) if m.get("name") == name), None)
+            files = (mentry or {}).get("files", [])
+
+        # 校验①清单一致
+        if files:
+            missing = [f for f in files if not (mod_root / str(f)).exists()]
+            if missing:
+                return {"ok": False, "error": f"清单声明文件缺失: {missing}"}
+        # 校验②结构规范
+        err = _validate_structure(mod_root, name, entry)
+        if err:
+            return {"ok": False, "error": f"结构不规范: {err}"}
+        # 校验③哈希（不符 → 拒收，保持旧版运行）
+        expected = entry.get("sha256", "")
+        if expected:
+            actual = _module_sha256(mod_root, files)
+            if actual != expected:
+                return {"ok": False, "error": "模块包哈希校验失败（可能被篡改或源已更新，请刷新源后重试）"}
+
+        # .bak 备份现目录（含 token，复制失败时恢复）
+        dest = MODULES_DIR / name
+        bak = MODULES_DIR / f"{name}.bak"
+        if bak.exists():
+            shutil.rmtree(bak, ignore_errors=True)
+        try:
+            shutil.copytree(dest, bak)
+        except OSError as e:
+            return {"ok": False, "error": f"备份现有模块失败: {e}"}
+
+        # 复制新文件（跳过 token）
+        try:
+            for rel in _expand_files(mod_root, files):
+                if rel == "token":
+                    continue  # G1：模块存在期间不轮换 token
+                dst_f = dest / rel
+                dst_f.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(mod_root / rel, dst_f)
+        except OSError as e:
+            shutil.rmtree(dest, ignore_errors=True)
+            try:
+                shutil.move(bak, dest)  # 恢复旧版
+            except OSError:
+                return {"ok": False, "error": f"复制失败且恢复失败（模块目录可能不完整，请重装）: {e}"}
+            return {"ok": False, "error": f"复制失败，已恢复旧版: {e}"}
+        shutil.rmtree(bak, ignore_errors=True)
+
+        # 更新后联动（schedule 重算 + job 重登记 + 豁免 + 索引刷新）
+        from modules.register import refresh_module_config, save_module_state
+        refresh_module_config(name)
+        save_module_state(name, version=str(entry.get("version") or ""), source_id=sid)
+        for m in src.get("modules", []):
+            if m.get("name") == name:
+                m["installed"] = True
+        save_sources(sources)
+        return {"ok": True, "updated": True, "name": name,
+                "version": str(entry.get("version") or "")}
+    finally:
+        if tmp_root is not None:
+            shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+# ---------- 每日自动更新检查（指纹驱动，静默） ----------
+
+def check_updates(sources: list[dict] | None = None, force: bool = False) -> dict:
+    """自动更新检查：指纹没变跳过（零开销）；变了 → 逐模块更新。
+
+    开关：全局 update.auto_enabled（config 用户段）&& 模块级 auto_update（settings.json）。
+    静默：只写日志与结果，不推送。force=True 绕过全局开关（web 手动检查/更新用）。
+    """
+    from bridge.config import get
+    if not force and not get("update.auto_enabled", True):
+        return {"checked": False, "reason": "全局自动更新已关闭"}
+    sources = sources if sources is not None else load_sources()
+    updated: list[str] = []
+    skipped: list[str] = []
+    errors: list[tuple[str, str]] = []
+    for src in sources:
+        if src.get("builtin") and src.get("type") != "local":
+            pass  # 官方源同样检查（模块都在官方源）
+        res = refresh_source(sources, src["id"])
+        if not res["ok"]:
+            continue  # 源不可达：跳过（静默，下次再查）
+        if not res["updated"]:
+            continue  # 指纹没变：源没动，跳过
+        for m in res["modules"] or []:
+            name = m.get("name")
+            if not name or not (MODULES_DIR / name / "module.json").is_file():
+                continue  # 未安装
+            from modules.register import get_auto_update
+            if not get_auto_update(name):
+                skipped.append(name)
+                continue
+            r = update_module_from_source(sources, src["id"], name)
+            if r.get("updated"):
+                updated.append(name)
+            elif not r.get("ok"):
+                errors.append((name, r.get("error", "未知错误")))
+    return {"checked": True, "updated": updated, "skipped": skipped, "errors": errors}
