@@ -7,12 +7,19 @@
   "$schema": "https://opencode.ai/config.json",
 
   // 默认免费模型（零 API key 开箱即用）；自定义模型可改为 "provider/model" 形式
-  "model": "opencode/mimo-v2-5-free",
+  "model": "opencode/mimo-v2.5-free",
 
   "permission": {
     // 项目外目录访问：默认放开家目录（读个人文档/发送文件需要）；可收窄为具体目录，如 "~/文档/**": "allow"
+    // 窄规则在后（后命中优先）：skills 外部目录与 SDK 凭证回落路径硬拒——agent 不得触碰
+    // （skills 只允许由模块体系安装；~/.wechat-agent-sdk 为 SDK 未打补丁时的凭证回落目录）
     "external_directory": {
-      "~/**": "allow"
+      "~/**": "allow",
+      "~/.config/opencode/skill/**": "deny",
+      "~/.config/opencode/skills/**": "deny",
+      "~/.claude/skills/**": "deny",
+      "~/.agents/skills/**": "deny",
+      "~/.wechat-agent-sdk/**": "deny"
     },
 
     // 读：项目内默认放开，硬拒 token/密钥（安全红线，勿删）
@@ -33,5 +40,32 @@
     // 以下示例仅为手动补充（路径请替换为自己的目录）：
     // "edit":  { "~/<个人目录>/**": "allow" },
     // "write": { "~/<个人目录>/**": "allow" }
+
+    // ---- 写侧硬性限制（2026-08-22）：逃逸面 + bridge 核心 + skills，防 agent 越权 ----
+    // 说明：权限 pattern 按"相对 worktree（数据根）"匹配（opencode 请求侧即相对路径）；
+    //       worktree 外目录（~/...）的读/写规则不在此段生效，须写 external_directory 段。
+    // 逃逸面：改这些 = 自授权力/改行为约束/改运行配置/改模块权限，硬拒
+    "edit": {
+      "opencode.jsonc": "deny",
+      "AGENTS.md": "deny",
+      ".config/**": "deny",
+      "agent-SDK/**": "deny",
+      // bridge 核心代码：改坏 = 服务崩，硬拒
+      "bridge/**": "deny",
+      // 项目内 skills 目录：agent 禁装（外部 skills 目录由 external_directory 段硬拒）
+      ".opencode/skill/**": "deny",
+      ".opencode/skills/**": "deny"
+    },
+    // install_skill 工具硬拒：agent 不得自装 skills（加载保留，供模块体系安装的 skill 使用）
+    "install_skill": "deny",
+    "write": {
+      "opencode.jsonc": "deny",
+      "AGENTS.md": "deny",
+      ".config/**": "deny",
+      "agent-SDK/**": "deny",
+      "bridge/**": "deny",
+      ".opencode/skill/**": "deny",
+      ".opencode/skills/**": "deny"
+    }
   }
 }

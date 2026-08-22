@@ -373,9 +373,12 @@ def install_module(sources: list[dict], sid: str, name: str) -> dict:
         save_sources(sources)
         from bridge.permissions import refresh_permissions
         refresh_permissions()
-        # 安装记录版本（installed.json，部署状态数据区）
+        # 安装记录版本（installed.json，部署状态数据区；源模块附完整性基准 sha256+files）
         from modules.register import save_module_state
-        save_module_state(name, version=str(entry.get("version") or ""), source_id=sid)
+        save_module_state(
+            name, version=str(entry.get("version") or ""), source_id=sid,
+            sha256=actual if expected else "", files=files if expected else [],
+        )
         return {"ok": True, "name": name, "enabled": False}
     finally:
         if tmp_root is not None:
@@ -467,7 +470,11 @@ def update_module_from_source(sources: list[dict], sid: str, name: str) -> dict:
         # 更新后联动（schedule 重算 + job 重登记 + 豁免 + 索引刷新）
         from modules.register import refresh_module_config, save_module_state
         refresh_module_config(name)
-        save_module_state(name, version=str(entry.get("version") or ""), source_id=sid)
+        # 更新后刷新完整性基准（本地篡改随更新被覆盖为合法新基准）
+        save_module_state(
+            name, version=str(entry.get("version") or ""), source_id=sid,
+            sha256=actual if expected else "", files=files if expected else [],
+        )
         for m in src.get("modules", []):
             if m.get("name") == name:
                 m["installed"] = True
@@ -516,3 +523,41 @@ def check_updates(sources: list[dict] | None = None, force: bool = False) -> dic
             elif not r.get("ok"):
                 errors.append((name, r.get("error", "未知错误")))
     return {"checked": True, "updated": updated, "skipped": skipped, "errors": errors}
+
+
+# ---------- 本地完整性校验（防部署机本地修改） ----------
+
+def verify_module_integrity(name: str) -> tuple[bool, str]:
+    """校验已装模块本地完整性：installed.json 基准（sha256+files）重算比对。
+
+    返回 (ok, 描述)；无基准（本地手写模块 / manifest 无 sha256）→ (True, "no-baseline") 跳过。
+    token 文件不在 manifest.files 清单内，不参与哈希（轮换不影响校验）。
+    """
+    from modules.register import get_module_state
+    st = get_module_state(name)
+    sha = st.get("sha256")
+    files = st.get("files")
+    if not sha or not files:
+        return True, "no-baseline"
+    mod_root = MODULES_DIR / name
+    if not mod_root.is_dir():
+        return False, "模块目录缺失"
+    try:
+        actual = _module_sha256(mod_root, files)
+    except Exception as e:
+        return False, f"哈希计算失败: {e}"
+    if actual != sha:
+        return False, "本地文件与安装基准不符（可能被篡改）"
+    return True, "ok"
+
+
+def verify_all_modules() -> list[tuple[str, str]]:
+    """全量校验已装模块：返回 [(name, 问题)]；无基准模块跳过。"""
+    problems: list[tuple[str, str]] = []
+    for sub in sorted(MODULES_DIR.iterdir()):
+        if not (sub / "module.json").is_file():
+            continue
+        ok, why = verify_module_integrity(sub.name)
+        if not ok:
+            problems.append((sub.name, why))
+    return problems

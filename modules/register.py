@@ -112,14 +112,21 @@ def get_module_state(name: str) -> dict:
     return {}
 
 
-def save_module_state(name: str, version: str = "", source_id: str = "", installed_at: str = "") -> bool:
-    """写 installed.json（安装/更新后记录版本与来源）。"""
+def save_module_state(
+    name: str, version: str = "", source_id: str = "", installed_at: str = "",
+    sha256: str = "", files: list | None = None,
+) -> bool:
+    """写 installed.json（安装/更新后记录版本与来源；源安装模块附完整性基准 sha256+files）。"""
     import datetime
     data = get_module_state(name)
     if version:
         data["version"] = str(version)
     if source_id:
         data["source_id"] = str(source_id)
+    if sha256:
+        data["sha256"] = str(sha256)
+    if files:
+        data["files"] = list(files)
     data["installed_at"] = installed_at or datetime.datetime.now().isoformat(timespec="seconds")
     try:
         dd = module_data_dir(name)

@@ -160,9 +160,17 @@ async def run_module(name: str, args: list[str] | None = None) -> int:
     """spawn 模块子进程，返回退出码。超时 300s 终止。
 
     H7：args 含 --dry-run（测试参数混入生产调度）→ 拒绝执行 + ERROR + rc=2（不记成功不补发）。
+    H9：调度前本地完整性快检——installed.json 基准不符（本地被修改）→ 拒绝执行 + 告警。
     """
     if args and "--dry-run" in args:
         log.error(f"[sched] {name} 规则 args 含 --dry-run（测试参数混入生产调度），拒绝执行，请从 module.json 删除")
+        return 2
+    # 完整性快检（无基准模块自动跳过；不符 = 本地被改，拒绝执行防跑被篡改的代码）
+    from bridge.module_source import verify_module_integrity
+    ok, why = verify_module_integrity(name)
+    if not ok:
+        log.error(f"[sched] {name} 完整性校验失败，拒绝执行: {why}")
+        _integrity_alert(name, why)
         return 2
     script = MODULES_DIR / name / f"{name}_worker.py"
     if not script.is_file():
@@ -195,6 +203,15 @@ def _rule_id(rule: dict, name: str, idx: int) -> str:
     return rule.get("id") or f"{name}|{idx}"
 
 
+def _integrity_alert(name: str, why: str) -> None:
+    """完整性校验失败告警：结构化事件（模块事件日志），一次失败一条防刷屏由调度器节奏天然限制。"""
+    try:
+        from modules.common.log import log_event
+        log_event("CRIT", name, "integrity_fail", why)
+    except Exception:
+        pass  # 事件日志失败不阻塞调度主流程
+
+
 _daily_check_date: str = ""  # 上次执行每日更新的日期（进程内去重）
 
 
@@ -224,6 +241,18 @@ async def _daily_update_check(now: datetime) -> None:
             log.info(f"[sched] 模块自动更新跳过（模块级开关关闭）: {result['skipped']}")
     except Exception as e:
         log.error(f"[sched] 模块自动更新检查异常: {e}")
+    # 每日全量完整性校验（更新后执行：基准已随更新刷新；本地被改且无更新机会的模块在此检出）
+    try:
+        from bridge.module_source import verify_all_modules
+        problems = await asyncio.to_thread(verify_all_modules)
+        if problems:
+            for name, why in problems:
+                log.error(f"[sched] 完整性校验失败（每日全量）: {name} {why}")
+                _integrity_alert(name, f"每日全量: {why}")
+        else:
+            log.info("[sched] 完整性校验（每日全量）通过")
+    except Exception as e:
+        log.error(f"[sched] 完整性校验（每日全量）异常: {e}")
 
 
 async def scheduler() -> None:
