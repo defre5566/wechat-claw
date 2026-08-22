@@ -715,3 +715,16 @@ def source_refresh(app, body: dict | None = None) -> dict:
     if not r["ok"]:
         return {"ok": False, "error": r["error"]}, 400
     return {"ok": True, "updated": r["updated"], "modules": r["modules"]}
+
+
+def autostart_get(app, body: dict | None = None) -> dict:
+    """自启动状态（服务/用户级/无 + bridge 运行态）。"""
+    from web.handlers.service_up import autostart_status
+    return autostart_status()
+
+
+def autostart_set(app, body: dict | None = None) -> dict:
+    """开机自动启动开关：开启/关闭（Windows 非管理员经 UAC 提权）。"""
+    body = body or {}
+    from web.handlers.service_up import autostart_set as _set
+    return _set(bool(body.get("on", False)))

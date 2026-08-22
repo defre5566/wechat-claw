@@ -235,6 +235,8 @@ ROUTES = {
     ("GET", "/api/admin/schema"): _h("admin", "schema_get", True),
     ("GET", "/api/admin/settings"): _h("admin", "settings_get", True),
     ("POST", "/api/admin/settings"): _h("admin", "settings_set", True),
+    ("GET", "/api/admin/autostart"): _h("admin", "autostart_get", True),
+    ("POST", "/api/admin/autostart"): _h("admin", "autostart_set", True),
     ("GET", "/api/admin/logs"): _h("admin", "logs_tail", True),
     ("POST", "/api/admin/logs"): _h("admin", "logs_tail", True),
     ("GET", "/api/admin/modules"): _h("admin", "modules_list", True),

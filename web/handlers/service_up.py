@@ -19,6 +19,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from bridge.config import DATA_ROOT, DEPLOY_ROOT, RESOURCE_ROOT
@@ -26,6 +27,34 @@ from bridge.config import DATA_ROOT, DEPLOY_ROOT, RESOURCE_ROOT
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 WEB_PORT = 8650
 VERSION = "0.1.2"
+
+# Windows 用户级自启：HKCU Run 键（登录后自动运行，无需管理员）
+_RUN_KEY = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
+_RUN_VALUE = "wechat-claw-bridge"
+
+
+def _log_web(msg: str) -> None:
+    """写数据根 logs/web.log（与向导同文件同格式；服务步骤记录，selftest 跳过）。"""
+    if SELFTEST:
+        return
+    try:
+        f = DATA_ROOT / "logs" / "web.log"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} [service_up] {msg}\n")
+    except Exception:
+        pass
+
+
+def _is_admin() -> bool:
+    """Windows 管理员检测（UAC 提权判断）；非 Windows 视为已授权（平台原逻辑）。"""
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
 
 
 def _write_and_run(path: Path, content: str, commands: list[list[str]]) -> list[dict]:
@@ -182,6 +211,58 @@ def _nssm() -> list[dict]:
     )
 
 
+def _nssm_remove() -> list[dict]:
+    """移除 wechat-bridge 系统服务（需管理员；调用前确认提权）。"""
+    if os.name != "nt":
+        return [{"cmd": "Windows 平台才支持 nssm", "ok": False}]
+    arch = "win64" if sys.maxsize > 2 ** 32 else "win32"
+    nssm = RESOURCE_ROOT / "vendor" / "nssm" / f"{arch}.exe"
+    if not nssm.is_file():
+        return [{"cmd": f"nssm 缺失: {nssm}", "ok": False}]
+    return _exec_commands([[str(nssm), "stop", "wechat-bridge"],
+                           [str(nssm), "remove", "wechat-bridge", "confirm"]])
+
+
+def _user_autostart_reg() -> list[dict]:
+    """用户级自启：HKCU Run 键 → 无窗口 VBS → 后台跑 bridge（登录后自动运行，无需管理员）。"""
+    if os.name != "nt":
+        return [{"cmd": "仅 Windows 支持用户级自启", "ok": False}]
+    vbs = DATA_ROOT / "wechat-claw-bridge.vbs"
+    py = sys.executable if getattr(sys, "frozen", False) \
+        else str(DEPLOY_ROOT / ".venv" / "Scripts" / "python.exe")
+    vbs_content = (
+        "' wechat-claw bridge 用户级自启（向导/管理后台生成）\n"
+        "Dim sh\n"
+        "Set sh = CreateObject(\"WScript.Shell\")\n"
+        "sh.Run \"\"\"%s\"\" -m bridge.main\", 0, False\n"
+    ) % py
+    steps = _write_file(vbs, vbs_content)
+    cmd = ["reg", "add", _RUN_KEY, "/v", _RUN_VALUE, "/t", "REG_SZ",
+           "/d", f'wscript.exe "{vbs}"', "/f"]
+    steps += _exec_commands([cmd])
+    return steps
+
+
+def _user_autostart_unreg() -> list[dict]:
+    """移除用户级自启（HKCU Run 键；无需管理员）。"""
+    if os.name != "nt":
+        return []
+    return _exec_commands([["reg", "delete", _RUN_KEY, "/v", _RUN_VALUE, "/f"]])
+
+
+def _service_up_windows() -> list[dict]:
+    """Windows 拉起 bridge：管理员 → nssm 系统服务；非管理员 → 用户级自启 + UAC 引导说明。"""
+    if _is_admin():
+        steps = _nssm()
+        steps.append({"cmd": "说明：系统服务 wechat-bridge 已注册（开机自启、免登录）", "ok": True})
+    else:
+        steps = _user_autostart_reg()
+        steps.append({"cmd": "说明：当前为普通权限，已注册用户级自启（登录后自动运行）。"
+                             "如需开机免登录的系统服务，请到管理后台开启『开机自动启动』"
+                             "——届时会弹出 UAC 授权窗口，请点『允许』", "ok": True})
+    return steps
+
+
 # ---------- 应用列表入口 / 卸载注册（数据根随平台规范，见 bridge.config.DATA_ROOT） ----------
 
 def _launcher_posix() -> str:
@@ -323,6 +404,7 @@ setlocal
 set NSSM=%~dp0nssm.exe
 "%NSSM%" stop wechat-bridge >nul 2>&1
 "%NSSM%" remove wechat-bridge confirm >nul 2>&1
+reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "wechat-claw-bridge" /f >nul 2>&1
 reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\wechat-claw" /f >nul 2>&1
 del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\wechat-claw\\wechat-claw Web 管理.lnk" /f >nul 2>&1
 rmdir "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\wechat-claw" >nul 2>&1
@@ -366,7 +448,7 @@ echo 微信登录凭证（如需彻底清除）：%USERPROFILE%\\.wechat-agent-s
 
 def handle(app, body: dict | None = None) -> dict:
     if os.name == "nt":
-        steps = _nssm() + _win_app_entries()
+        steps = _service_up_windows() + _win_app_entries()
     elif sys.platform == "darwin":
         steps = _launchd() + _macos_app_entry()
     else:
@@ -374,4 +456,135 @@ def handle(app, body: dict | None = None) -> dict:
     ok = all(s["ok"] for s in steps)
     if ok:
         app.steps["service_up"] = True
+    # 步骤结果落 web.log（无论成败，可追溯）
+    failed = [s for s in steps if not s["ok"]]
+    if ok:
+        _log_web(f"service_up 完成（{len(steps)} 步全成功）")
+    else:
+        _log_web(f"service_up 部分失败（{len(failed)}/{len(steps)} 步失败）: "
+                 f"{failed[0].get('out', '') if failed else ''}")
     return {"ok": ok, "steps": steps}
+
+
+# ---------- 管理后台「开机自动启动」开关（Windows UAC 提权；Linux/macOS 免提权） ----------
+
+def _bridge_running() -> bool:
+    """探测 bridge 是否在运行：push 入口端口（默认 9898）TCP 可连。"""
+    try:
+        from bridge.config import get as get_cfg
+        port = int(get_cfg("push.port", 9898))
+        import socket
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except Exception:
+        return False
+
+
+def _platform_service_exists() -> bool:
+    """非 Windows 平台守护存在性（systemd/launchd；Linux 实机测试另行讨论，只留接口）。"""
+    try:
+        if sys.platform == "darwin":
+            r = subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=10)
+            return "wechat-bridge" in (r.stdout or "")
+        r = subprocess.run(["systemctl", "--user", "list-unit-files", "wechat-bridge.service"],
+                           capture_output=True, text=True, timeout=10)
+        return r.returncode == 0 and "wechat-bridge.service" in (r.stdout or "")
+    except Exception:
+        return False
+
+
+def autostart_status() -> dict:
+    """自启动真实状态：{mode: system|user|none, bridge_running}。"""
+    mode = "none"
+    if os.name == "nt":
+        try:
+            r = subprocess.run(["sc", "query", "wechat-bridge"],
+                               capture_output=True, text=True, timeout=15)
+            if r.returncode == 0:
+                mode = "system"
+        except Exception:
+            pass
+        if mode == "none":
+            try:
+                r = subprocess.run(["reg", "query", _RUN_KEY, "/v", _RUN_VALUE],
+                                   capture_output=True, text=True, timeout=15)
+                if r.returncode == 0:
+                    mode = "user"
+            except Exception:
+                pass
+    elif _platform_service_exists():
+        mode = "system"
+    return {"ok": True, "mode": mode, "bridge_running": _bridge_running()}
+
+
+def _uac_elevate(on: bool) -> list[dict]:
+    """UAC 提权执行 nssm 装/卸服务：runas 跑辅助 bat（弹窗需用户在电脑前点『允许』）。"""
+    if os.name != "nt":
+        return []
+    if SELFTEST:
+        return [{"cmd": f"（selftest）将发起 UAC 提权执行 nssm {'install' if on else 'remove'}",
+                 "ok": True, "dry": True}]
+    bat = DATA_ROOT / f"wechat-claw-autostart-{'on' if on else 'off'}.bat"
+    arch = "win64" if sys.maxsize > 2 ** 32 else "win32"
+    nssm = RESOURCE_ROOT / "vendor" / "nssm" / f"{arch}.exe"
+    py = sys.executable if getattr(sys, "frozen", False) \
+        else str(DEPLOY_ROOT / ".venv" / "Scripts" / "python.exe")
+    if on:
+        lines = [
+            f'"{nssm}" install wechat-bridge "{py}" -m bridge.main',
+            f'"{nssm}" set wechat-bridge AppDirectory "{DEPLOY_ROOT}"',
+            f'"{nssm}" set wechat-bridge AppExit Default Restart',
+            f'"{nssm}" set wechat-bridge AppRestartDelay 10000',
+            f'"{nssm}" start wechat-bridge',
+        ]
+    else:
+        lines = [
+            f'"{nssm}" stop wechat-bridge >nul 2>&1',
+            f'"{nssm}" remove wechat-bridge confirm',
+        ]
+    content = "@echo off\nchcp 65001 >nul\n" + "\n".join(lines) + f"\nexit /b %errorlevel%\n"
+    steps = _write_file(bat, content)
+    try:
+        import ctypes
+        h = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", "cmd.exe", f'/c ""{bat}""', None, 1)
+        if h > 32:
+            steps.append({"cmd": "已发起 UAC 提权（请在弹窗点『允许』），稍后刷新状态确认",
+                          "ok": True})
+        else:
+            steps.append({"cmd": f"UAC 未获授权（代码 {h}）：用户取消或拒绝了提权", "ok": False})
+    except Exception as e:
+        steps.append({"cmd": f"UAC 提权发起失败: {e}", "ok": False})
+    return steps
+
+
+def autostart_set(on: bool) -> dict:
+    """开关执行：开启 → 系统服务（非管理员 UAC 提权）；关闭 → 移除服务 + 清用户级自启。
+
+    返回 {ok, steps, mode, uac_required}——uac_required=True 时前端提示用户在弹窗点允许。
+    """
+    uac_required = False
+    if os.name != "nt":
+        # Linux/macOS：免提权（systemd/launchd 用户级即可），实机测试另行讨论
+        steps = _systemd() if on else _exec_commands(
+            [["systemctl", "--user", "disable", "--now", "wechat-bridge"]])
+    else:
+        if on:
+            if _is_admin():
+                steps = _nssm()
+            else:
+                steps = _user_autostart_unreg()  # 升级为服务时先清用户级（互斥）
+                steps += _uac_elevate(True)
+                uac_required = True
+        else:
+            steps = _user_autostart_unreg()
+            if _is_admin():
+                steps += _nssm_remove()
+            else:
+                steps += _uac_elevate(False)
+                uac_required = True
+    ok = all(s["ok"] for s in steps)
+    _log_web(f"autostart_set({'开启' if on else '关闭'}): {'成功' if ok else '失败'}"
+             f"（{'需 UAC' if uac_required else '已提权/免提权'}）")
+    return {"ok": ok, "steps": steps, "mode": autostart_status().get("mode", "none"),
+            "uac_required": uac_required}

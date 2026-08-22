@@ -9,7 +9,9 @@ const app = $("#app");
 const state = {
   page: "home",
   drawer: false,
-  autostart: true,
+  autostart: false,
+  autostartMode: "none",
+  autostartPoll: null,
   mode: localStorage.getItem("wc-mode") || "light",
   accent: localStorage.getItem("wc-accent") || "amber",
   homeCards: [],
@@ -168,16 +170,60 @@ function modules() {
 }
 
 async function loadData() {
-  const [profile, modules, sources, weather] = await Promise.all([
+  const [profile, modules, sources, weather, autostart] = await Promise.all([
     api.get("/api/profile"),
     api.get("/api/admin/modules"),
     api.get("/api/admin/sources"),
     api.get("/api/admin/weather").catch(() => null),
+    api.get("/api/admin/autostart").catch(() => null),
   ]);
   state.profile = profile;
   state.modules = modules.modules || [];
   state.sources = sources.sources || [];
   state.weather = weather?.ok ? weather : null;
+  if (autostart?.ok) {
+    state.autostartMode = autostart.mode || "none";
+    state.autostart = autostart.mode !== "none";
+  }
+}
+
+async function pollAutostart(attempts = 10) {
+  for (let i = 0; i < attempts; i++) {
+    await new Promise(r => setTimeout(r, 1500));
+    try {
+      const d = await api.get("/api/admin/autostart");
+      if (!d.ok) continue;
+      if (d.mode === "system" || d.mode === "user") {
+        state.autostartMode = d.mode;
+        state.autostart = true;
+        render();
+        toast(`已生效（${d.mode === "system" ? "系统服务·开机自启" : "用户级·登录自启"}）`, "success");
+        return;
+      }
+      if (d.mode === "none") { render(); toast("未检测到自启（可能未完成）", "error"); return; }
+    } catch (e) { /* 继续轮询 */ }
+  }
+  render();
+  toast("状态刷新超时，请查看 web.log 或手动确认", "error");
+}
+
+async function toggleAutostart(b) {
+  b.disabled = true;
+  const on = !state.autostart;
+  try {
+    const d = await api.post("/api/admin/autostart", { on });
+    if (d.uac_required) {
+      toast("请在 UAC 弹窗中点击『允许』，稍后自动确认…", "info");
+      pollAutostart();
+    } else {
+      if (!on) { state.autostart = false; state.autostartMode = "none"; render(); toast("已关闭开机自动启动", "success"); }
+      else if (d.mode === "system" || d.mode === "user") { state.autostart = true; state.autostartMode = d.mode; render(); toast("已开启开机自动启动", "success"); }
+    }
+  } catch (e) {
+    toast(e.message, "error");
+  } finally {
+    b.disabled = false;
+  }
 }
 function render() { applyTheme(); const content = state.page === "home" ? home() : state.page === "settings" ? settings() : state.page === "user" ? user() : modules(); app.innerHTML = shell(content); bind(); }
 function bind() {
@@ -185,7 +231,7 @@ function bind() {
   $("[data-menu]")?.addEventListener("click", () => { state.drawer = !state.drawer; render(); });
   bindThemeControls();
   $$('[data-toggle-key]').forEach(b => b.onclick = () => {
-    if (b.dataset.toggleKey === "autostart") { state.autostart = !state.autostart; b.classList.toggle("on", state.autostart); toast(state.autostart ? "已开启开机自动启动" : "已关闭开机自动启动"); }
+    if (b.dataset.toggleKey === "autostart") { toggleAutostart(b); }
     else {
       const m = state.modules.find(x => `module:${x.name}` === b.dataset.toggleKey); if (!m) return;
       b.disabled = true;
