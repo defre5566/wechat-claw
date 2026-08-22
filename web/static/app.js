@@ -417,11 +417,18 @@ function renderWizard() {
         <button class="btn btn-primary" id="ocInstall">自动安装 opencode</button>
         <button class="btn btn-secondary" id="ocRedetect">重新检测</button>
       </div>` : "";
-    const actionBtn = current === 1 ? "" : `<div class="wizard-actions"><button class="btn btn-primary" id="wizardAction">${["开始体检", "检测 opencode", "开始装配", "生成配置", "获取二维码", "进入工作台"][current]} <span>→</span></button></div>`;
+    const actionBtn = current === 1 || current === 4 ? "" : `<div class="wizard-actions"><button class="btn btn-primary" id="wizardAction">${["开始体检", "检测 opencode", "开始装配", "生成配置", "获取二维码", "进入工作台"][current]} <span>→</span></button></div>`;
     const loginPanel = current === 4 ? `
-      <div class="qr-box" id="qrBox">二维码区域</div>
-      <div class="login-banner waiting" id="loginBanner">⏳ 获取二维码…</div>
-      <div class="wizard-actions"><button class="btn btn-secondary btn-sm" id="qrRefresh">↻ 刷新二维码</button></div>` : "";
+      <div class="login-row">
+        <div class="qr-box" id="qrBox">二维码区域</div>
+        <div class="login-side">
+          <div class="login-banner waiting" id="loginBanner">⏳ 获取二维码…</div>
+          <div class="login-actions">
+            <button class="btn btn-primary" id="wizardAction">获取二维码 <span>→</span></button>
+            <button class="btn btn-secondary" id="qrRefresh">↻ 刷新二维码</button>
+          </div>
+        </div>
+      </div>` : "";
     app.innerHTML = `<main class="wizard-layout"><header class="wizard-top"><div class="brand-lockup"><span>✦</span><div><strong>wechat-claw</strong><small>初始化向导</small></div></div><div class="theme-slot">${themeCard()}</div></header>
       <section class="wizard-progress">${WIZARD_STEPS.map((name, i) => `<button class="wizard-step ${i === current ? "active" : ""} ${done.has(i) ? "done" : ""}" data-step="${i}"><b>${done.has(i) ? "✓" : i + 1}</b><span>${name}</span></button>`).join("")}</section>
       <section class="wizard-card"><div class="wizard-copy"><span class="card-label">STEP ${String(current + 1).padStart(2, "0")}</span><h1>${WIZARD_TITLES[current]}</h1><p>${WIZARD_DESC[current]}</p></div>${current === 3 ? `<div class="wizard-form"><label class="field">管理密码<input id="wizardPwd" type="password" placeholder="至少 6 位"></label></div>` : ""}${ocPanel}${loginPanel}${actionBtn}<div id="wizardResult" class="check-results"></div></section>
