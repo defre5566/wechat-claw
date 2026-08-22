@@ -44,3 +44,9 @@ wechat-claw_modules_official/
 
 # 开发日志（不入库不推送）
 devlog/
+
+# 本机生成配置（部署产物，不入库）
+opencode.jsonc
+
+# 审阅报告（本地产物，不入库）
+ura-*.md
