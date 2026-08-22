@@ -368,8 +368,8 @@ textarea { resize: vertical; line-height: 1.6; }
 .wizard-footer #wizardHint { color: #b05d58; font-size: 12px; }
 .qr-box { display: grid; place-items: center; width: 200px; height: 200px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text-tertiary); font-size: 13px; }
 .qr-box img { width: 170px; height: 170px; border-radius: 8px; }
-.login-row { position: relative; display: flex; justify-content: center; margin-top: 22px; }
-.login-side { position: absolute; left: calc(50% + 126px); top: 50%; transform: translateY(-50%); display: grid; gap: 12px; width: 300px; }
+.login-row { display: flex; align-items: center; justify-content: center; gap: 26px; margin-top: 22px; }
+.login-side { display: grid; gap: 12px; width: 300px; }
 .login-actions { display: flex; gap: 10px; }
 .login-actions .btn { flex: 1; min-height: 38px; }
 .login-banner { text-align: center; margin: 0; padding: 9px 12px; border-radius: 10px; font-size: 13px; }
