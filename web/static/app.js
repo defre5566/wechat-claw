@@ -319,29 +319,98 @@ const WIZARD_STEPS = ["环境体检", "opencode", "项目装配", "配置生成"
 const WIZARD_TITLES = ["先把基础准备好。", "准备对话引擎。", "装配项目依赖。", "给后台设一道门。", "连接你的微信。", "你的助理准备好了。"];
 const WIZARD_DESC = ["检查这台机器是否满足 wechat-claw 的运行条件。", "检测并准备 opencode 运行时。", "创建虚拟环境并安装依赖。", "设置进入后台所需的管理密码。", "扫描二维码连接微信。", "进入小助手工作台。"];
 function renderWizard() {
-  let current = 0; const done = new Set();
+  let current = 0; const done = new Set(); let ocPollTimer = null;
+
+  function markDone(i) {
+    done.add(i);
+    const stepEl = $(`[data-step="${i}"]`); if (stepEl) { stepEl.classList.add("done"); const b = stepEl.querySelector("b"); if (b) b.textContent = "✓"; }
+    $("#wizardHint").textContent = ""; $("#wizardNext").disabled = false;
+  }
+
+  /* ---- opencode 自动安装（第二步） ---- */
+  function ocPost(path) {
+    return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).then(r => r.json().catch(() => ({})));
+  }
+  function ocArea(html) { const a = $("#ocArea"); if (a) a.innerHTML = html; }
+  function ocInstalled(version) {
+    ocArea(`<div class="check-row ok"><b>✓</b><span>opencode 已安装</span><small>${esc(version || "")}</small></div>`);
+    const btn = $("#ocInstall"); if (btn) { btn.textContent = "✓ 已安装"; btn.disabled = true; }
+    markDone(1);
+  }
+  function ocMissing() {
+    ocArea(`<div class="check-row fail"><b>!</b><span>未检测到 opencode</span><small>点击「自动安装 opencode」由系统后台安装</small></div>`);
+    const btn = $("#ocInstall"); if (btn) { btn.textContent = "自动安装 opencode"; btn.disabled = false; }
+  }
+  function ocDetect() {
+    ocArea(`<div class="check-row"><b>…</b><span>正在检测 opencode…</span></div>`);
+    ocPost("/api/opencode/detect").then(d => {
+      if (d.already) ocInstalled(d.version);
+      else if (d.missing) ocMissing();
+      else ocArea(`<div class="check-row fail"><b>!</b><span>${esc(d.error || "检测失败")}</span></div>`);
+    }).catch(e => ocArea(`<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`));
+  }
+  function ocPollStart() {
+    const btn = $("#ocInstall"); if (btn) { btn.disabled = true; btn.textContent = "安装中…"; }
+    const progress = $("#ocProgress"); if (progress) progress.style.display = "";
+    clearInterval(ocPollTimer);
+    ocPollTimer = setInterval(() => {
+      api.get("/api/opencode/status").then(d => {
+        const stage = $("#ocStage"); if (stage && d.stage) stage.textContent = d.stage;
+        const log = $("#ocLog");
+        if (log && d.lines && d.lines.length) { const div = document.createElement("div"); div.className = "log-line"; div.textContent = d.lines[d.lines.length - 1]; log.appendChild(div); }
+        if (d.done) {
+          clearInterval(ocPollTimer);
+          if (d.ok) ocDetect();
+          else { const b = $("#ocInstall"); if (b) { b.textContent = "自动安装 opencode"; b.disabled = false; } ocArea(`<div class="check-row fail"><b>!</b><span>安装失败，可重试</span></div>`); }
+        }
+      }).catch(() => {});
+    }, 1500);
+  }
+  function ocInstall() {
+    const btn = $("#ocInstall"); btn.disabled = true; btn.textContent = "准备安装…";
+    ocPost("/api/opencode/install").then(d => {
+      if (d.already) { ocInstalled(d.version); return; }
+      ocPollStart();
+    }).catch(e => { btn.disabled = false; btn.textContent = "自动安装 opencode"; ocArea(`<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`); });
+  }
+
   const draw = () => {
     applyTheme();
+    const ocPanel = current === 1 ? `
+      <div class="check-results" id="ocArea"><div class="check-row"><b>…</b><span>正在检测 opencode…</span></div></div>
+      <div id="ocProgress" style="display:none">
+        <div class="check-row"><b>…</b><span id="ocStage">准备安装…</span></div>
+        <div class="modal-log" id="ocLog" style="margin-top:10px"></div>
+      </div>
+      <div class="wizard-actions">
+        <button class="btn btn-primary" id="ocInstall">自动安装 opencode</button>
+        <button class="btn btn-secondary" id="ocRedetect">重新检测</button>
+      </div>` : "";
+    const actionBtn = current === 1 ? "" : `<div class="wizard-actions"><button class="btn btn-primary" id="wizardAction">${["开始体检", "检测 opencode", "开始装配", "生成配置", "获取二维码", "进入工作台"][current]} <span>→</span></button></div>`;
     app.innerHTML = `<main class="wizard-layout"><header class="wizard-top"><div class="brand-lockup"><span>✦</span><div><strong>wechat-claw</strong><small>初始化向导</small></div></div><div class="theme-slot">${themeCard()}</div></header>
       <section class="wizard-progress">${WIZARD_STEPS.map((name, i) => `<button class="wizard-step ${i === current ? "active" : ""} ${done.has(i) ? "done" : ""}" data-step="${i}"><b>${done.has(i) ? "✓" : i + 1}</b><span>${name}</span></button>`).join("")}</section>
-      <section class="wizard-card"><div class="wizard-copy"><span class="card-label">STEP ${String(current + 1).padStart(2, "0")}</span><h1>${WIZARD_TITLES[current]}</h1><p>${WIZARD_DESC[current]}</p></div>${current === 3 ? `<div class="wizard-form"><label class="field">管理密码<input id="wizardPwd" type="password" placeholder="至少 6 位"></label></div>` : ""}<div class="wizard-actions"><button class="btn btn-primary" id="wizardAction">${["开始体检", "检测 opencode", "开始装配", "生成配置", "获取二维码", "进入工作台"][current]} <span>→</span></button></div><div id="wizardResult" class="check-results"></div></section>
+      <section class="wizard-card"><div class="wizard-copy"><span class="card-label">STEP ${String(current + 1).padStart(2, "0")}</span><h1>${WIZARD_TITLES[current]}</h1><p>${WIZARD_DESC[current]}</p></div>${current === 3 ? `<div class="wizard-form"><label class="field">管理密码<input id="wizardPwd" type="password" placeholder="至少 6 位"></label></div>` : ""}${ocPanel}${actionBtn}<div id="wizardResult" class="check-results"></div></section>
       <footer class="wizard-footer"><button class="btn btn-secondary" id="wizardPrev" ${current === 0 ? "disabled" : ""}>← 上一步</button><span id="wizardHint"></span><button class="btn btn-primary" id="wizardNext">${current === 5 ? "进入工作台 →" : "下一步 →"}</button></footer></main><div class="toast"></div>`;
     bindThemeControls();
     $$("[data-step]").forEach(b => b.onclick = () => { const i = Number(b.dataset.step); if (i <= current) { current = i; draw(); } });
     $("#wizardPrev").onclick = () => { if (current) { current--; draw(); } };
     $("#wizardNext").onclick = () => { if (current === 5) { location.href = "/admin.html"; return; } if (done.has(current)) { current++; draw(); } else { $("#wizardHint").textContent = "请先完成当前步骤"; } };
-    $("#wizardAction").onclick = async () => {
+    if (current === 1) {
+      $("#ocInstall").onclick = ocInstall;
+      $("#ocRedetect").onclick = ocDetect;
+      ocDetect();
+      api.get("/api/opencode/status").then(d => { if (d.started && !d.done) ocPollStart(); }).catch(() => {});
+    }
+    const action = $("#wizardAction");
+    if (action) action.onclick = async () => {
       const result = $("#wizardResult");
       try {
         if (current === 0) { const d = await api.post("/api/env_check"); result.innerHTML = (d.items || []).map(x => `<div class="check-row ${x.ok ? "ok" : "fail"}"><b>${x.ok ? "✓" : "!"}</b><span>${esc(x.name)}</span><small>${esc(x.value || "")}</small></div>`).join(""); }
-        else if (current === 1) { const d = await api.post("/api/opencode/detect"); result.innerHTML = `<div class="check-row ok"><b>✓</b><span>opencode 已安装</span><small>${esc(d.version || "")}</small></div>`; }
         else if (current === 2) { await api.post("/api/assemble"); result.innerHTML = `<div class="check-row ok"><b>✓</b><span>依赖装配完成</span></div>`; }
         else if (current === 3) { const pwd = $("#wizardPwd").value; if (pwd.length < 6) throw new Error("密码至少 6 位"); await api.post("/api/config/gen", { password: pwd }); result.innerHTML = `<div class="check-row ok"><b>✓</b><span>配置已生成</span></div>`; }
         else if (current === 4) { await api.post("/api/login/setup"); result.innerHTML = `<div class="check-row ok"><b>✓</b><span>微信登录已连接</span></div>`; }
         else { location.href = "/admin.html"; return; }
-        done.add(current);
-        const stepEl = $(`[data-step="${current}"]`); if (stepEl) { stepEl.classList.add("done"); const b = stepEl.querySelector("b"); if (b) b.textContent = "✓"; }
-        $("#wizardHint").textContent = ""; $("#wizardNext").disabled = false;
+        markDone(current);
       } catch (error) { result.innerHTML = `<div class="check-row fail"><b>!</b><span>${esc(error.message)}</span></div>`; }
     };
   };
