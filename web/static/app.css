@@ -366,6 +366,12 @@ textarea { resize: vertical; line-height: 1.6; }
 .check-row small { color: var(--text-tertiary); font-size: 11px; }
 .wizard-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
 .wizard-footer #wizardHint { color: #b05d58; font-size: 12px; }
+.qr-box { display: grid; place-items: center; width: 200px; height: 200px; margin-top: 22px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text-tertiary); font-size: 13px; }
+.qr-box img { width: 170px; height: 170px; border-radius: 8px; }
+.login-banner { text-align: center; margin: 12px 0 0; padding: 9px 12px; border-radius: 10px; font-size: 13px; }
+.login-banner.waiting { background: var(--surface-subtle); color: var(--text-secondary); }
+.login-banner.done { background: var(--accent-soft); color: var(--accent-hover); }
+.login-banner.error { background: #fbefed; color: #b05d58; }
 @media (max-width: 640px) {
   .auth-card { padding: 40px 24px 28px; }
   .auth-card .theme-slot { position: static; margin-bottom: 16px; }

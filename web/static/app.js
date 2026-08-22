@@ -374,6 +374,37 @@ function renderWizard() {
     }).catch(e => { btn.disabled = false; btn.textContent = "自动安装 opencode"; ocArea(`<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`); });
   }
 
+  /* ---- 扫码登录（第五步） ---- */
+  let loginPollTimer = null;
+  function loginStart() {
+    const banner = $("#loginBanner"); const box = $("#qrBox");
+    clearInterval(loginPollTimer);
+    if (banner) { banner.className = "login-banner waiting"; banner.textContent = "⏳ 获取二维码…"; }
+    api.post("/api/login/setup").then(d => {
+      if (d.already) {
+        if (banner) { banner.className = "login-banner done"; banner.textContent = "✅ 已登录（复用已有会话）"; }
+        markDone(4);
+        return;
+      }
+      if (box && d.qr_url) box.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=170x170&data=${encodeURIComponent(d.qr_url)}" alt="二维码">`;
+      if (banner) { banner.className = "login-banner waiting"; banner.textContent = "⏳ 等待扫码…"; }
+      loginPollTimer = setInterval(() => {
+        api.get("/api/login/status").then(s => {
+          if (s.done) {
+            clearInterval(loginPollTimer);
+            if (banner) { banner.className = "login-banner done"; banner.textContent = "✅ 登录成功"; }
+            markDone(4);
+          } else if (s.status === "expired" || s.status === "error") {
+            clearInterval(loginPollTimer);
+            if (banner) { banner.className = "login-banner error"; banner.textContent = "二维码已失效，请点击刷新"; }
+          }
+        }).catch(() => {});
+      }, 2000);
+    }).catch(e => {
+      if (banner) { banner.className = "login-banner error"; banner.textContent = "二维码获取失败：" + e.message; }
+    });
+  }
+
   const draw = () => {
     applyTheme();
     const ocPanel = current === 1 ? `
@@ -387,9 +418,13 @@ function renderWizard() {
         <button class="btn btn-secondary" id="ocRedetect">重新检测</button>
       </div>` : "";
     const actionBtn = current === 1 ? "" : `<div class="wizard-actions"><button class="btn btn-primary" id="wizardAction">${["开始体检", "检测 opencode", "开始装配", "生成配置", "获取二维码", "进入工作台"][current]} <span>→</span></button></div>`;
+    const loginPanel = current === 4 ? `
+      <div class="qr-box" id="qrBox">二维码区域</div>
+      <div class="login-banner waiting" id="loginBanner">⏳ 获取二维码…</div>
+      <div class="wizard-actions"><button class="btn btn-secondary btn-sm" id="qrRefresh">↻ 刷新二维码</button></div>` : "";
     app.innerHTML = `<main class="wizard-layout"><header class="wizard-top"><div class="brand-lockup"><span>✦</span><div><strong>wechat-claw</strong><small>初始化向导</small></div></div><div class="theme-slot">${themeCard()}</div></header>
       <section class="wizard-progress">${WIZARD_STEPS.map((name, i) => `<button class="wizard-step ${i === current ? "active" : ""} ${done.has(i) ? "done" : ""}" data-step="${i}"><b>${done.has(i) ? "✓" : i + 1}</b><span>${name}</span></button>`).join("")}</section>
-      <section class="wizard-card"><div class="wizard-copy"><span class="card-label">STEP ${String(current + 1).padStart(2, "0")}</span><h1>${WIZARD_TITLES[current]}</h1><p>${WIZARD_DESC[current]}</p></div>${current === 3 ? `<div class="wizard-form"><label class="field">管理密码<input id="wizardPwd" type="password" placeholder="至少 6 位"></label></div>` : ""}${ocPanel}${actionBtn}<div id="wizardResult" class="check-results"></div></section>
+      <section class="wizard-card"><div class="wizard-copy"><span class="card-label">STEP ${String(current + 1).padStart(2, "0")}</span><h1>${WIZARD_TITLES[current]}</h1><p>${WIZARD_DESC[current]}</p></div>${current === 3 ? `<div class="wizard-form"><label class="field">管理密码<input id="wizardPwd" type="password" placeholder="至少 6 位"></label></div>` : ""}${ocPanel}${loginPanel}${actionBtn}<div id="wizardResult" class="check-results"></div></section>
       <footer class="wizard-footer"><button class="btn btn-secondary" id="wizardPrev" ${current === 0 ? "disabled" : ""}>← 上一步</button><span id="wizardHint"></span><button class="btn btn-primary" id="wizardNext">${current === 5 ? "进入工作台 →" : "下一步 →"}</button></footer></main><div class="toast"></div>`;
     bindThemeControls();
     $$("[data-step]").forEach(b => b.onclick = () => { const i = Number(b.dataset.step); if (i <= current) { current = i; draw(); } });
@@ -401,6 +436,9 @@ function renderWizard() {
       ocDetect();
       api.get("/api/opencode/status").then(d => { if (d.started && !d.done) ocPollStart(); }).catch(() => {});
     }
+    if (current === 4) {
+      $("#qrRefresh").onclick = loginStart;
+    }
     const action = $("#wizardAction");
     if (action) action.onclick = async () => {
       const result = $("#wizardResult");
@@ -408,7 +446,7 @@ function renderWizard() {
         if (current === 0) { const d = await api.post("/api/env_check"); result.innerHTML = (d.items || []).map(x => `<div class="check-row ${x.ok ? "ok" : "fail"}"><b>${x.ok ? "✓" : "!"}</b><span>${esc(x.name)}</span><small>${esc(x.value || "")}</small></div>`).join(""); }
         else if (current === 2) { await api.post("/api/assemble"); result.innerHTML = `<div class="check-row ok"><b>✓</b><span>依赖装配完成</span></div>`; }
         else if (current === 3) { const pwd = $("#wizardPwd").value; if (pwd.length < 6) throw new Error("密码至少 6 位"); await api.post("/api/config/gen", { password: pwd }); result.innerHTML = `<div class="check-row ok"><b>✓</b><span>配置已生成</span></div>`; }
-        else if (current === 4) { await api.post("/api/login/setup"); result.innerHTML = `<div class="check-row ok"><b>✓</b><span>微信登录已连接</span></div>`; }
+        else if (current === 4) { loginStart(); return; }
         else { location.href = "/admin.html"; return; }
         markDone(current);
       } catch (error) { result.innerHTML = `<div class="check-row fail"><b>!</b><span>${esc(error.message)}</span></div>`; }
