@@ -84,6 +84,84 @@ def fetch_weather() -> str:
     return _weather_at(*DEFAULT_LOC, "北京")
 
 
+def _weather_location() -> tuple[float, float, str]:
+    """解析当前天气查询位置，优先用户保存的区级坐标。"""
+    loc = get_location()
+    lat, lon = loc.get("lat"), loc.get("lon")
+    name = str(loc.get("city", "")) or "北京"
+    if lat is not None and lon is not None:
+        return float(lat), float(lon), name
+    for query in (loc.get("city"), loc.get("en")):
+        if not query:
+            continue
+        geo = http_get_json(f"{GEO_API}?{urllib.parse.urlencode({'name': query, 'count': 1, 'language': 'zh'})}")
+        if geo and geo.get("results"):
+            row = geo["results"][0]
+            return float(row["latitude"]), float(row["longitude"]), name
+    return float(DEFAULT_LOC[0]), float(DEFAULT_LOC[1]), "北京"
+
+
+def fetch_weather_snapshot() -> dict:
+    """获取当前天气和未来数小时摘要，供 Web 卡片等只读展示使用。"""
+    lat, lon, name = _weather_location()
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "current": "temperature_2m,weather_code,wind_speed_10m",
+        "hourly": "temperature_2m,weather_code",
+        "forecast_days": 2,
+        "timezone": "auto",
+    }
+    data = http_get_json(f"{WEATHER_API}?{urllib.parse.urlencode(params)}")
+    if not data or not data.get("current"):
+        return {"ok": False, "city": name, "error": "天气暂时无法获取"}
+    current = data["current"]
+    hourly = data.get("hourly") or {}
+    times = hourly.get("time") or []
+    temperatures = hourly.get("temperature_2m") or []
+    codes = hourly.get("weather_code") or []
+    now = str(current.get("time", ""))
+    points = []
+    for index, value in enumerate(times):
+        if value < now or len(points) >= 4:
+            continue
+        code = codes[index] if index < len(codes) else 0
+        points.append({
+            "time": value[11:16],
+            "temperature": round(temperatures[index]) if index < len(temperatures) else None,
+            "code": code,
+            "emoji": WEATHER_CODES.get(code, ("☀️", "晴"))[0],
+            "description": WEATHER_CODES.get(code, ("☀️", "晴"))[1],
+        })
+    code = current.get("weather_code", 0)
+    emoji, description = WEATHER_CODES.get(code, ("☀️", "晴"))
+    return {
+        "ok": True,
+        "city": name,
+        "updated_at": current.get("time"),
+        "current": {
+            "temperature": round(current.get("temperature_2m", 0)),
+            "wind_speed": round(current.get("wind_speed_10m", 0)),
+            "code": code,
+            "emoji": emoji,
+            "description": description,
+        },
+        "hourly": points,
+    }
+
+
+def get_weather_snapshot(use_cache: bool = True, ttl: float = 1800.0) -> dict:
+    """读取带 30 分钟 TTL 的天气快照。"""
+    if use_cache:
+        cache = shared_load("weather_snapshot")
+        if cache.get("snapshot") and time.time() - cache.get("ts", 0) < ttl:
+            return cache["snapshot"]
+    snapshot = fetch_weather_snapshot()
+    if snapshot.get("ok"):
+        shared_save("weather_snapshot", {"snapshot": snapshot, "ts": time.time()})
+    return snapshot
+
+
 def fetch_pollen(today=None) -> str:
     """（已移出）花粉归 common.localdata，此处占位防旧引用崩溃。"""
     raise NotImplementedError("花粉已移至 common.localdata（fetch('pollen')）")

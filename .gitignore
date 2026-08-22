@@ -4,6 +4,10 @@ __pycache__/
 *.pyc
 *.egg-info/
 
+# Frontend development dependencies
+node_modules/
+test-results/
+
 # 用户配置目录（部署后生成，含配置/密钥/用户数据；备份 = 打包此目录）
 .config/
 

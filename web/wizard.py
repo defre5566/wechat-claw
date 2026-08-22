@@ -38,6 +38,8 @@ PORT = int(os.environ.get("WEB_PORT", "8650"))
 STATIC = RESOURCE_ROOT / "web" / "static"
 MAX_BODY = 1 * 1024 * 1024
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
+# 隔离 UI 预览：仅用于本地预览实例，允许 admin.html 自动创建临时 session。
+PREVIEW = os.environ.get("WEB_PREVIEW") == "1"
 # 防 DNS rebinding / CSRF：Host 主机名白名单 + Origin/Referer 同源校验
 _ALLOWED_HOSTNAMES = {"127.0.0.1", "localhost", "[::1]", "::1"}
 
@@ -221,6 +223,7 @@ ROUTES = {
     ("POST", "/api/auth"): _h("admin", "auth_login"),
     ("POST", "/api/admin/password"): _h("admin", "password_change", True),
     ("GET", "/api/profile"): _h("admin", "profile_get", True),
+    ("GET", "/api/admin/weather"): _h("admin", "weather_get", True),
     ("POST", "/api/profile"): _h("admin", "profile_set", True),
     ("POST", "/api/profile/city"): _h("admin", "profile_set_city", True),
     ("POST", "/api/profile/locate"): _h("admin", "profile_locate", True),
@@ -327,6 +330,14 @@ class Handler(BaseHTTPRequestHandler):
             ".svg": "image/svg+xml",
             ".json": "application/json; charset=utf-8",
         }.get(suffix, "application/octet-stream")
+        if PREVIEW and rel.lstrip("/") == "admin.html":
+            data = target.read_bytes().replace(
+                b'<body data-app="admin">',
+                b'<body data-app="admin" data-preview="1">',
+                1,
+            )
+            self._file_bytes(data, ctype)
+            return
         self._file(target, ctype)
 
     # ---- 入口 ----

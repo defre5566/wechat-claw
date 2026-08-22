@@ -20,6 +20,8 @@ from .weather import (
     weather_alerts,
     fetch_weather,
     get_weather,
+    fetch_weather_snapshot,
+    get_weather_snapshot,
     http_get_json,
     WEATHER_CODES,
 )

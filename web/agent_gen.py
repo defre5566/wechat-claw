@@ -37,12 +37,26 @@ DEFAULT_RULES: list[str] = [
 def get_identity() -> dict:
     """读身份字段（含默认值兜底）。"""
     data = _userdata.load("agent/identity", {}) or {}
-    return {k: data.get(k, v) for k, v in DEFAULTS.items()}
+    fields = {k: data.get(k, v) for k, v in DEFAULTS.items()}
+    if not str(fields["assistant_name"]).strip():
+        fields["assistant_name"] = DEFAULTS["assistant_name"]
+    # Default name is not the same as a name the user explicitly chose.
+    fields["assistant_name_customized"] = bool(
+        data.get("assistant_name_customized", data.get("assistant_name", "") not in ("", DEFAULTS["assistant_name"]))
+    )
+    return fields
 
 
 def set_identity(identity: dict) -> bool:
     """写身份字段（自动备份 prev）。"""
+    current = _userdata.load("agent/identity", {}) or {}
     data = {k: identity.get(k, v) for k, v in DEFAULTS.items()}
+    previous_customized = current.get("assistant_name_customized")
+    if previous_customized is None:
+        previous_customized = current.get("assistant_name", "") not in ("", DEFAULTS["assistant_name"])
+    data["assistant_name_customized"] = bool(
+        identity.get("assistant_name_customized", previous_customized)
+    )
     return _userdata.save("agent/identity", data)
 
 

@@ -27,17 +27,25 @@
 </div>
 
 <script src="theme.js"></script>
+<script src="api.js"></script>
 <script>
 (function () {
   var btn = document.getElementById("loginBtn");
   var input = document.getElementById("pwdInput");
   function doLogin() {
-    var orig = btn.innerHTML;
+    var pwd = input.value;
+    if (!pwd) { input.focus(); return; }
     btn.innerHTML = "登录中…";
     btn.disabled = true;
-    setTimeout(function () {
-      window.location.href = "admin.html";
-    }, 700);
+    api.post("/api/auth", { password: pwd }).then(function (data) {
+      api.setToken(data.token);
+      location.href = "admin.html";
+    }).catch(function (e) {
+      btn.innerHTML = "登 录";
+      btn.disabled = false;
+      var hint = document.querySelector(".login-hint");
+      hint.innerHTML = '<span style="color:var(--danger)">' + e.message + '</span><br>' + hint.innerHTML;
+    });
   }
   btn.addEventListener("click", doLogin);
   input.addEventListener("keydown", function (e) {

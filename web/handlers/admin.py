@@ -114,6 +114,12 @@ def profile_set(app, body: dict | None = None) -> dict:
     return {"ok": True}
 
 
+def weather_get(app, body: dict | None = None) -> dict:
+    """只读天气快照；天气失败不影响后台其他页面。"""
+    from modules.common.weather import get_weather_snapshot
+    return get_weather_snapshot()
+
+
 def profile_set_city(app, body: dict | None = None) -> dict:
     """选定城市（GUI 三级联动）：按 code 取本地城市库（名称/拼音/坐标）写入 location.json。"""
     body = body or {}
@@ -439,7 +445,16 @@ def modules_list(app, body: dict | None = None) -> dict:
     修复前用 build_index（只含 enabled）→ 关掉的模块从后台消失无法复启。
     """
     from modules.register import list_modules
-    return {"ok": True, "modules": list_modules()}
+    from bridge.module_source import load_sources
+    modules = list_modules()
+    sources = load_sources()
+    source_names = {}
+    for source in sources:
+        for item in source.get("modules", []) or []:
+            source_names[item.get("name")] = source.get("name") or source.get("id") or "模块源"
+    for module in modules:
+        module["source"] = source_names.get(module["name"], "本地模块")
+    return {"ok": True, "modules": modules}
 
 
 def module_get(app, body: dict | None = None) -> dict:
