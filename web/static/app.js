@@ -93,7 +93,7 @@ function nav() {
   return `<aside class="sidebar ${state.drawer ? "open" : ""}"><nav>${items.map(([id, label, icon]) => `<button class="nav-item ${state.page === id ? "active" : ""}" data-nav="${id}"><span class="nav-icon">${icon}</span><span>${esc(label)}</span></button>`).join("")}</nav></aside>`;
 }
 function shell(content) {
-  return `<div class="app-shell">${nav()}<main class="workspace"><header class="global-bar"><div class="global-left"><button class="mobile-menu" data-menu aria-label="打开导航">☰</button></div><div class="global-actions">${state.page === "home" ? '<button class="btn btn-primary" data-card-manager><b>＋</b> 添加卡片</button>' : ""}<span class="avatar">${esc(initials(userName()))}</span></div></header>${content}</main></div><div class="toast"></div>`;
+  return `<div class="app-shell">${nav()}<main class="workspace"><header class="global-bar"><div class="global-left"><button class="mobile-menu" data-menu aria-label="打开导航">☰</button></div><div class="global-actions">${state.page === "home" ? '<button class="btn btn-primary" data-card-manager><b>＋</b> 添加卡片</button>' : ""}<span class="avatar"><img src="/api/profile/avatar?ts=${Date.now()}" alt="" onerror="this.remove()">${esc(initials(userName()))}</span></div></header>${content}</main></div><div class="toast"></div>`;
 }
 function modal(title, body) {
   const node = document.createElement("div"); node.className = "modal-backdrop";
@@ -143,7 +143,7 @@ function user() {
   const p = state.profile || {}, i = p.identity || {}, habits = p.habits || [];
   return `<section class="page secondary-page"><header class="page-heading user-heading"><div><h1>用户与助理</h1><p>设置助理的人设、表达方式和对你的了解。</p></div><div class="user-save-actions"><button class="btn btn-secondary" data-undo-all>撤销修改</button><button class="btn btn-primary" data-save-profile>保存用户与助理</button></div></header><form id="profileForm" class="user-rows">
     <div class="user-row-1">
-      <article class="card panel persona-final"><div class="panel-head"><div><span class="card-label">YOUR ASSISTANT</span><h2>助理人设</h2><p>保存后自动生成 AGENTS.md。</p></div><label class="persona-avatar" data-open="avatar">${esc(initials(userName()))}<input id="avatarInput" type="file" accept="image/*" hidden></label></div><div class="persona-avatar-action"><button type="button" class="btn btn-primary btn-sm" data-open="avatar">选择头像</button><span>默认使用抽象小助手形象。</span></div><div class="identity-fields"><label class="field">怎么称呼你<input name="address" value="${esc(i.address || "")}"></label><label class="field">助理名称<input name="assistant_name" value="${esc(i.assistant_name || "小助手")}"></label></div><label class="field full">角色设定<textarea name="role" rows="3">${esc(i.role || "")}</textarea></label><label class="field full">语言习惯<textarea name="language" rows="2">${esc(i.language || "")}</textarea></label><div class="inline-actions"><button type="button" class="btn btn-secondary btn-sm" data-toast="用 opencode 优化人设">用 opencode 优化</button><button type="button" class="btn btn-quiet" data-undo="identity">撤销</button></div></article>
+      <article class="card panel persona-final"><div class="panel-head"><div><span class="card-label">YOUR ASSISTANT</span><h2>助理人设</h2><p>保存后自动生成 AGENTS.md。</p></div><label class="persona-avatar" data-open="avatar"><img src="/api/profile/avatar?ts=${Date.now()}" alt="" onerror="this.remove()">${esc(initials(userName()))}<input id="avatarInput" type="file" accept="image/*" hidden></label></div><div class="persona-avatar-action"><button type="button" class="btn btn-primary btn-sm" data-open="avatar">选择头像</button><button type="button" class="btn btn-secondary btn-sm" data-avatar-undo>撤销头像</button><span>默认使用抽象小助手形象。</span></div><div class="identity-fields"><label class="field">怎么称呼你<input name="address" value="${esc(i.address || "")}"></label><label class="field">助理名称<input name="assistant_name" value="${esc(i.assistant_name || "小助手")}"></label></div><label class="field full">角色设定<textarea name="role" rows="3">${esc(i.role || "")}</textarea></label><label class="field full">语言习惯<textarea name="language" rows="2">${esc(i.language || "")}</textarea></label><div class="inline-actions"><button type="button" class="btn btn-secondary btn-sm" data-optimize>用 opencode 优化</button><button type="button" class="btn btn-quiet" data-undo="identity">撤销</button></div></article>
       <div class="user-side-stack">
         <article class="card panel memory-final"><div class="panel-head"><div><span class="card-label">I REMEMBER</span><h2>我记得这些</h2><p>用于首页建议和模块上下文。</p></div><button type="button" class="btn btn-quiet" data-undo="habits">撤销</button></div><div class="tags" id="habitTags">${habits.map(h => `<span class="tag">${esc(h)}<button type="button" data-remove-habit="${esc(h)}">×</button></span>`).join("")}</div><button type="button" class="btn btn-primary btn-sm" data-open="habit">＋ 添加偏好</button></article>
         <article class="card panel city-final"><div class="panel-head"><div><span class="card-label">YOUR PLACE</span><h2>所在城市</h2><p>天气和本地化模块会使用这里。</p></div><button type="button" class="btn btn-quiet" data-undo="city">撤销</button></div><div class="city-layout"><strong class="city-name">${esc(p.location?.city || "未设置城市")}</strong><span class="city-sub">${esc(p.location?.province || "城市用于天气和本地化信息")}</span><div class="city-footer"><button type="button" class="btn btn-secondary btn-sm" data-locate>定位</button><button type="button" class="btn btn-primary btn-sm" data-open="city">选择城市</button></div></div></article>
@@ -162,7 +162,7 @@ function moduleCard(m) {
 function modules() {
   const sources = state.sources || [];
   return `<section class="page secondary-page">${heading("模块管理", "管理模块源、已安装模块、版本和运行状态。")}<div class="module-stagger">
-    <article class="card panel module-sources"><div class="panel-head"><div><h2>模块源</h2><p>管理模块目录的仓库和本地路径。</p></div><button class="btn btn-primary" data-open="add-source">＋ 添加模块源</button></div><div class="source-list">${sources.length ? sources.map(s => `<div class="source-row"><div class="source-name"><strong>${esc(s.name || s.id)}</strong><small>${esc(s.url || "本地模块源")} · ${(s.modules || []).length} 个模块</small></div><span class="source-url">${esc(s.url || "本地")}</span><button class="btn btn-secondary btn-sm" data-source-refresh>刷新</button></div>`).join("") : '<p class="modal-note">暂无模块源</p>'}</div></article>
+    <article class="card panel module-sources"><div class="panel-head"><div><h2>模块源</h2><p>管理模块目录的仓库和本地路径。</p></div><button class="btn btn-primary" data-open="add-source">＋ 添加模块源</button></div><div class="source-list">${sources.length ? sources.map(s => `<div class="source-row"><div class="source-name"><strong>${esc(s.name || s.id)}</strong><small>${esc(s.url || "本地模块源")} · ${(s.modules || []).length} 个模块</small></div><span class="source-url">${esc(s.url || "本地")}</span><button class="btn btn-secondary btn-sm" data-source-refresh="${esc(s.id || "")}">刷新</button>${s.builtin ? "" : `<button class="btn btn-danger btn-sm" data-source-remove="${esc(s.id || "")}">删除</button>`}</div>`).join("") : '<p class="modal-note">暂无模块源</p>'}</div></article>
     <article class="card panel module-control-panel"><div class="module-top-actions"><div><h2>已安装模块</h2><p>检查更新、刷新列表，或添加新的模块能力。</p></div><div class="module-buttons"><button class="btn btn-secondary" data-check>检查更新</button><button class="btn btn-secondary" data-refresh>刷新列表</button><button class="btn btn-primary" data-open="install">＋ 添加模块</button></div></div><div class="module-grid">${state.modules.map(moduleCard).join("") || '<p class="modal-note">还没有安装模块</p>'}</div></article>
   </div></section>`;
 }
@@ -197,13 +197,16 @@ function bind() {
   $("[data-card-manager]")?.addEventListener("click", openCardManager);
   $$('[data-remove-card]').forEach(b => b.onclick = () => { const node = b.closest("[data-plugin-card]"); if (node) node.remove(); const next = cards().filter(x => x !== b.dataset.removeCard); localStorage.setItem(CARDS_KEY, JSON.stringify(next)); toast("卡片已移除"); });
   $$('[data-locate]').forEach(b => b.onclick = () => locateCity());
-  $$('[data-source-refresh]').forEach(b => b.onclick = () => toast("模块源已刷新"));
+  $$('[data-source-refresh]').forEach(b => b.onclick = async () => { b.disabled = true; try { const d = await api.post("/api/admin/sources/refresh", { id: b.dataset.sourceRefresh }); toast(d.ok ? "模块源已刷新" : (d.error || "刷新失败"), "success"); } catch (e) { toast(e.message, "error"); } finally { b.disabled = false; } });
+  $$('[data-source-remove]').forEach(b => b.onclick = async () => { if (!confirm("确定删除这个模块源？")) return; try { await api.post("/api/admin/sources/remove", { id: b.dataset.sourceRemove }); state.sources = (await api.get("/api/admin/sources")).sources || []; render(); toast("模块源已删除", "success"); } catch (e) { toast(e.message, "error"); } });
   $$('[data-module-settings]').forEach(b => b.onclick = () => openModuleSettings(b.dataset.moduleSettings));
   $$('[data-module-remove]').forEach(b => b.onclick = async () => { if (!confirm(`确定卸载 ${b.dataset.moduleRemove}？`)) return; try { await api.post("/api/admin/modules/remove", { name: b.dataset.moduleRemove }); state.modules = state.modules.filter(x => x.name !== b.dataset.moduleRemove); render(); toast("模块已卸载", "success"); } catch (e) { toast(e.message, "error"); } });
   $$('[data-auto]').forEach(b => b.onclick = async () => { const m = state.modules.find(x => x.name === b.dataset.auto); if (!m) return; try { await api.post("/api/admin/module/auto_update", { name: m.name, on: m.auto_update === false }); m.auto_update = m.auto_update === false; render(); } catch (e) { toast(e.message, "error"); } });
   $$('[data-check]').forEach(b => b.onclick = async () => { b.disabled = true; try { const r = await api.post("/api/admin/modules/check_updates"); toast(r.updated?.length ? `已更新：${r.updated.join("、")}` : "检查完成，没有需要更新的模块", "success"); } catch (e) { toast(e.message, "error"); } finally { b.disabled = false; } });
   $$('[data-refresh]').forEach(b => b.onclick = async () => { try { const d = await api.get("/api/admin/modules"); state.modules = d.modules || []; render(); toast("模块列表已刷新", "success"); } catch (e) { toast(e.message, "error"); } });
   $$('[data-undo]').forEach(b => b.onclick = () => undoProfile(b.dataset.undo));
+  $$('[data-avatar-undo]').forEach(b => b.onclick = async () => { try { await api.post("/api/profile/avatar/undo"); state.profile = await api.get("/api/profile"); render(); toast("头像已撤销", "success"); } catch (e) { toast(e.message, "error"); } });
+  $$('[data-optimize]').forEach(b => b.onclick = () => optimizePersona(b));
   $$('[data-remove-habit]').forEach(b => b.onclick = () => b.parentElement.remove());
   const form = $("#profileForm"); if (form) bindProfile(form);
   $("[data-save-profile]")?.addEventListener("click", () => form?.requestSubmit());
@@ -236,6 +239,20 @@ function bindProfile(form) {
 function addHabitToDom() {}
 async function uploadAvatar(e) { const file = e.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async () => { try { await api.post("/api/profile/avatar", { data: reader.result }); state.profile = await api.get("/api/profile"); render(); toast("头像已更新", "success"); } catch (error) { toast(error.message, "error"); } }; reader.readAsDataURL(file); }
 async function undoProfile(field) { try { await api.post("/api/profile/undo", { field }); state.profile = await api.get("/api/profile"); render(); toast("已撤销上次修改", "success"); } catch (e) { toast(e.message, "error"); } }
+async function optimizePersona(btn) {
+  const form = $("#profileForm");
+  const role = form?.querySelector('[name="role"]'); const lang = form?.querySelector('[name="language"]');
+  if (!role || !lang) return;
+  if (!role.value.trim() && !lang.value.trim()) { toast("角色设定和语言习惯都为空，无法优化", "error"); return; }
+  btn.disabled = true; btn.textContent = "优化中…";
+  try {
+    const d = await api.post("/api/agents/optimize_persona", { role: role.value, language: lang.value });
+    if (d.role) role.value = d.role;
+    if (d.language) lang.value = d.language;
+    toast(d.fallback ? "opencode 输出未按格式截取，原始结果已填入角色设定" : "人设优化完成，请确认后保存", "success");
+  } catch (e) { toast(e.message, "error"); }
+  finally { btn.disabled = false; btn.textContent = "用 opencode 优化"; }
+}
 
 function openModal(name) {
   if (name === "logs") {
@@ -319,7 +336,7 @@ const WIZARD_STEPS = ["环境体检", "opencode", "项目装配", "配置生成"
 const WIZARD_TITLES = ["先把基础准备好。", "准备对话引擎。", "装配项目依赖。", "给后台设一道门。", "连接你的微信。", "你的助理准备好了。"];
 const WIZARD_DESC = ["检查这台机器是否满足 wechat-claw 的运行条件。", "检测并准备 opencode 运行时。", "创建虚拟环境并安装依赖。", "设置进入后台所需的管理密码。", "扫描二维码连接微信。", "进入小助手工作台。"];
 function renderWizard() {
-  let current = 0; const done = new Set(); let ocPollTimer = null;
+  let current = 0; const done = new Set(); let ocPollTimer = null; let asmPollTimer = null;
 
   function markDone(i) {
     done.add(i);
@@ -352,14 +369,18 @@ function renderWizard() {
   function ocPollStart() {
     const btn = $("#ocInstall"); if (btn) { btn.disabled = true; btn.textContent = "安装中…"; }
     const progress = $("#ocProgress"); if (progress) progress.style.display = "";
+    const barWrap = $("#ocBarWrap"); if (barWrap) barWrap.style.display = "";
     clearInterval(ocPollTimer);
     ocPollTimer = setInterval(() => {
       api.get("/api/opencode/status").then(d => {
         const stage = $("#ocStage"); if (stage && d.stage) stage.textContent = d.stage;
         const log = $("#ocLog");
         if (log && d.lines && d.lines.length) { const div = document.createElement("div"); div.className = "log-line"; div.textContent = d.lines[d.lines.length - 1]; log.appendChild(div); }
+        const bar = $("#ocBar");
+        if (bar && log) bar.style.width = Math.min(90, 10 + log.children.length * 5) + "%";
         if (d.done) {
           clearInterval(ocPollTimer);
+          const b2 = $("#ocBar"); if (b2) b2.style.width = "100%";
           if (d.ok) ocDetect();
           else { const b = $("#ocInstall"); if (b) { b.textContent = "自动安装 opencode"; b.disabled = false; } ocArea(`<div class="check-row fail"><b>!</b><span>安装失败，可重试</span></div>`); }
         }
@@ -411,13 +432,19 @@ function renderWizard() {
       <div class="check-results" id="ocArea"><div class="check-row"><b>…</b><span>正在检测 opencode…</span></div></div>
       <div id="ocProgress" style="display:none">
         <div class="check-row"><b>…</b><span id="ocStage">准备安装…</span></div>
+        <div class="progress" id="ocBarWrap" style="display:none"><div class="progress-bar" id="ocBar" style="width:0%"></div></div>
         <div class="modal-log" id="ocLog" style="margin-top:10px"></div>
       </div>
       <div class="wizard-actions">
         <button class="btn btn-primary" id="ocInstall">自动安装 opencode</button>
         <button class="btn btn-secondary" id="ocRedetect">重新检测</button>
       </div>` : "";
-    const actionBtn = current === 1 || current === 4 ? "" : `<div class="wizard-actions"><button class="btn btn-primary" id="wizardAction">${["开始体检", "检测 opencode", "开始装配", "生成配置", "获取二维码", "进入工作台"][current]} <span>→</span></button></div>`;
+    const asmPanel = current === 2 ? `
+      <div class="check-results" id="asmArea"><div class="check-row"><b>…</b><span>正在检测装配状态…</span></div></div>
+      <div class="progress" id="asmBarWrap" style="display:none"><div class="progress-bar" id="asmBar" style="width:0%"></div></div>
+      <div class="modal-log" id="asmLog" style="display:none;margin-top:10px"></div>
+      <div class="wizard-actions"><button class="btn btn-primary" id="asmAction">开始装配</button></div>` : "";
+    const actionBtn = current === 1 || current === 2 || current === 4 ? "" : `<div class="wizard-actions"><button class="btn btn-primary" id="wizardAction">${["开始体检", "检测 opencode", "开始装配", "生成配置", "获取二维码", "进入工作台"][current]} <span>→</span></button></div>`;
     const loginPanel = current === 4 ? `
       <div class="login-row">
         <div class="qr-box" id="qrBox">二维码区域</div>
@@ -431,7 +458,7 @@ function renderWizard() {
       </div>` : "";
     app.innerHTML = `<main class="wizard-layout"><header class="wizard-top"><div class="brand-lockup"><span>✦</span><div><strong>wechat-claw</strong><small>初始化向导</small></div></div><div class="theme-slot">${themeCard()}</div></header>
       <section class="wizard-progress">${WIZARD_STEPS.map((name, i) => `<button class="wizard-step ${i === current ? "active" : ""} ${done.has(i) ? "done" : ""}" data-step="${i}"><b>${done.has(i) ? "✓" : i + 1}</b><span>${name}</span></button>`).join("")}</section>
-      <section class="wizard-card"><div class="wizard-copy"><span class="card-label">STEP ${String(current + 1).padStart(2, "0")}</span><h1>${WIZARD_TITLES[current]}</h1><p>${WIZARD_DESC[current]}</p></div>${current === 3 ? `<div class="wizard-form"><label class="field">管理密码<input id="wizardPwd" type="password" placeholder="至少 6 位"></label></div>` : ""}${ocPanel}${loginPanel}${actionBtn}<div id="wizardResult" class="check-results"></div></section>
+      <section class="wizard-card"><div class="wizard-copy"><span class="card-label">STEP ${String(current + 1).padStart(2, "0")}</span><h1>${WIZARD_TITLES[current]}</h1><p>${WIZARD_DESC[current]}</p></div>${current === 3 ? `<div class="wizard-form"><label class="field">管理密码<input id="wizardPwd" type="password" placeholder="至少 6 位"></label></div>` : ""}${ocPanel}${asmPanel}${loginPanel}${actionBtn}<div id="wizardResult" class="check-results"></div></section>
       <footer class="wizard-footer"><button class="btn btn-secondary" id="wizardPrev" ${current === 0 ? "disabled" : ""}>← 上一步</button><span id="wizardHint"></span><button class="btn btn-primary" id="wizardNext">${current === 5 ? "进入工作台 →" : "下一步 →"}</button></footer></main><div class="toast"></div>`;
     bindThemeControls();
     $$("[data-step]").forEach(b => b.onclick = () => { const i = Number(b.dataset.step); if (i <= current) { current = i; draw(); } });
@@ -443,6 +470,35 @@ function renderWizard() {
       ocDetect();
       api.get("/api/opencode/status").then(d => { if (d.started && !d.done) ocPollStart(); }).catch(() => {});
     }
+    if (current === 2) {
+      const asmArea = $("#asmArea");
+      const asmAction = $("#asmAction");
+      const asmReady = () => { asmArea.innerHTML = `<div class="check-row ok"><b>✓</b><span>依赖已就绪，无需装配</span></div>`; asmAction.style.display = "none"; markDone(2); };
+      const asmStart = () => {
+        asmAction.disabled = true; asmAction.textContent = "装配中…";
+        const wrap = $("#asmBarWrap"), bar = $("#asmBar"), log = $("#asmLog");
+        wrap.style.display = ""; log.style.display = "";
+        asmPollTimer = setInterval(() => {
+          api.get("/api/assemble/status").then(d => {
+            const lines = d.lines || [];
+            if (log && lines.length) { const div = document.createElement("div"); div.className = "log-line"; div.textContent = lines[lines.length - 1]; log.appendChild(div); }
+            if (bar) bar.style.width = Math.min(90, 10 + lines.length * 5) + "%";
+            if (d.done) {
+              clearInterval(asmPollTimer);
+              if (bar) bar.style.width = "100%";
+              if (d.ok) { asmArea.innerHTML = `<div class="check-row ok"><b>✓</b><span>依赖装配完成</span></div>`; markDone(2); }
+              else { asmAction.disabled = false; asmAction.textContent = "重试装配"; asmArea.innerHTML = `<div class="check-row fail"><b>!</b><span>装配失败，可重试</span></div>`; }
+            }
+          }).catch(() => {});
+        }, 1500);
+        api.post("/api/assemble").catch(e => { asmAction.disabled = false; asmAction.textContent = "开始装配"; asmArea.innerHTML = `<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`; });
+      };
+      asmAction.onclick = asmStart;
+      api.post("/api/assemble/detect").then(d => {
+        if (d.ready) asmReady();
+        else asmArea.innerHTML = `<div class="check-row fail"><b>!</b><span>${esc(d.reason || "依赖未就绪")}</span><small>点击「开始装配」自动安装</small></div>`;
+      }).catch(e => asmArea.innerHTML = `<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`);
+    }
     if (current === 4) {
       $("#qrRefresh").onclick = loginStart;
     }
@@ -451,7 +507,6 @@ function renderWizard() {
       const result = $("#wizardResult");
       try {
         if (current === 0) { const d = await api.post("/api/env_check"); result.innerHTML = (d.items || []).map(x => `<div class="check-row ${x.ok ? "ok" : "fail"}"><b>${x.ok ? "✓" : "!"}</b><span>${esc(x.name)}</span><small>${esc(x.value || "")}</small></div>`).join(""); }
-        else if (current === 2) { await api.post("/api/assemble"); result.innerHTML = `<div class="check-row ok"><b>✓</b><span>依赖装配完成</span></div>`; }
         else if (current === 3) { const pwd = $("#wizardPwd").value; if (pwd.length < 6) throw new Error("密码至少 6 位"); await api.post("/api/config/gen", { password: pwd }); result.innerHTML = `<div class="check-row ok"><b>✓</b><span>配置已生成</span></div>`; }
         else if (current === 4) { loginStart(); return; }
         else { location.href = "/admin.html"; return; }

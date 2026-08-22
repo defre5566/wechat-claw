@@ -98,7 +98,16 @@ def profile_get(app, body: dict | None = None) -> dict:
         "habits": get_habits(),
         "identity": agent_gen.get_identity(),
         "rules": agent_gen.get_rules(),
+        "lifestyle": _load_lifestyle(),
     }
+
+
+def _load_lifestyle() -> str:
+    return str(agent_gen._userdata.load("agent/lifestyle", "") or "")
+
+
+def _save_lifestyle(value: str) -> bool:
+    return agent_gen._userdata.save("agent/lifestyle", value)
 
 
 def profile_set(app, body: dict | None = None) -> dict:
@@ -111,6 +120,8 @@ def profile_set(app, body: dict | None = None) -> dict:
         agent_gen.set_identity(dict(body["identity"]))
     if "rules" in body:
         agent_gen.set_rules([str(r) for r in body["rules"]])
+    if "lifestyle" in body:
+        _save_lifestyle(str(body.get("lifestyle", "")))
     return {"ok": True}
 
 
@@ -227,6 +238,84 @@ def profile_undo(app, body: dict | None = None) -> dict:
 def agents_render(app, body: dict | None = None) -> dict:
     out = agent_gen.write_agents()
     return {"ok": True, "file": str(out)}
+
+
+_PERSONA_OPT_TEMPLATE = """你是一名专业的人设优化顾问。请把下面的「角色设定」和「语言习惯」分别扩写、优化成更丰满、更可执行、符合个人数字助理定位的文本。
+
+用户称呼：{address}
+助理名称：{assistant_name}
+当前角色设定：{role}
+当前语言习惯：{language}
+行为守则：{rules}
+兴趣爱好：{habits}
+生活习惯：{lifestyle}
+
+要求：
+1. 「角色设定」至少 8 句，覆盖：身份定位、陪伴方式、沟通风格、边界意识、主动性原则、与用户的关系、日常行为准则、自我要求
+2. 「语言习惯」至少 8 句，覆盖：句式偏好、用词风格、礼貌分寸、解释方式、拒绝方式、提问方式、语气控制、特殊场景用语
+3. 语言平实具体，不说空话套话，不要“我是一个……”式的苍白开场
+4. 严格按下面的格式输出，不要标题、不要额外解释：
+
+【角色设定】
+<优化后的角色设定，至少 8 句>
+【语言习惯】
+<优化后的语言习惯，至少 8 句>"""
+
+
+def _extract_sections(output: str) -> dict:
+    """按【角色设定】/【语言习惯】标记截取两段；缺标记时尽力回退。"""
+    role = language = ""
+    if "【角色设定】" in output:
+        rest = output.split("【角色设定】", 1)[1]
+        if "【语言习惯】" in rest:
+            role, language = rest.split("【语言习惯】", 1)
+        else:
+            role = rest
+    elif "【语言习惯】" in output:
+        language = output.split("【语言习惯】", 1)[1]
+    else:
+        role = output
+    return {"role": role.strip(), "language": language.strip()}
+
+
+def optimize_persona(app, body: dict | None = None) -> dict:
+    """用 opencode run 优化人设：前端传入表单当前 role/language，返回两段截取结果。"""
+    import os
+    import subprocess
+    body = body or {}
+    role_in = str(body.get("role", "") or "").strip()
+    lang_in = str(body.get("language", "") or "").strip()
+    if not role_in and not lang_in:
+        return {"ok": False, "error": "角色设定和语言习惯都为空，无法优化"}, 400
+    from bridge.config import get as get_cfg
+    from bridge.config import resolve_opencode, xdg_env
+    binary = resolve_opencode()
+    if not binary:
+        return {"ok": False, "error": "未找到 opencode 可执行文件（acp.command / PATH / ~/.opencode/bin）"}, 400
+    model = str(get_cfg("acp.model") or "deepseek/deepseek-chat")
+    ident = agent_gen.get_identity()
+    prompt = _PERSONA_OPT_TEMPLATE.format(
+        address=str(ident.get("address") or ""),
+        assistant_name=str(ident.get("assistant_name") or ""),
+        role=role_in,
+        language=lang_in,
+        rules="；".join(agent_gen.get_rules()),
+        habits="、".join(get_habits()),
+        lifestyle=_load_lifestyle(),
+    )
+    env = os.environ.copy()
+    env.update(xdg_env())
+    try:
+        r = subprocess.run([binary, "run", "-m", model, prompt], capture_output=True, text=True, timeout=120, env=env)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "opencode 优化超时（120 秒），请稍后重试"}, 504
+    output = (r.stdout or r.stderr or "").strip()
+    if not output:
+        return {"ok": False, "error": "opencode 未返回任何输出"}, 502
+    sections = _extract_sections(output)
+    if not sections["role"] and not sections["language"]:
+        return {"ok": True, "role": output, "language": "", "fallback": True}
+    return {"ok": True, **sections}
 
 
 # ---------- 用户配置（config.yaml 用户段） ----------

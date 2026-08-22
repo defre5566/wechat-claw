@@ -229,6 +229,7 @@ ROUTES = {
     ("POST", "/api/profile/locate"): _h("admin", "profile_locate", True),
     ("POST", "/api/profile/undo"): _h("admin", "profile_undo", True),
     ("POST", "/api/agents/render"): _h("admin", "agents_render", True),
+    ("POST", "/api/agents/optimize_persona"): _h("admin", "optimize_persona", True),
     ("POST", "/api/profile/avatar"): _h("admin", "avatar_set", True),
     ("POST", "/api/profile/avatar/undo"): _h("admin", "avatar_undo", True),
     ("GET", "/api/admin/schema"): _h("admin", "schema_get", True),

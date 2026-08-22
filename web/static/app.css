@@ -380,6 +380,11 @@ textarea { resize: vertical; line-height: 1.6; }
   .login-row { flex-direction: column; gap: 16px; }
   .login-side { position: static; transform: none; width: 100%; }
 }
+.progress { height: 8px; background: var(--surface-subtle); border-radius: 999px; overflow: hidden; margin: 12px 0; }
+.progress-bar { height: 100%; background: var(--accent); border-radius: 999px; transition: width 400ms ease; }
+.persona-avatar { position: relative; overflow: hidden; }
+.persona-avatar img, .avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+.avatar { position: relative; overflow: hidden; }
 @media (max-width: 640px) {
   .auth-card { padding: 40px 24px 28px; }
   .auth-card .theme-slot { position: static; margin-bottom: 16px; }
