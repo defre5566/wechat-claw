@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sys
@@ -20,6 +21,8 @@ from pathlib import Path
 
 from bridge.config import MODULES_ROOT
 from modules.common.io import load_json, time_to_cron
+
+log = logging.getLogger("wechat-bridge")
 
 MODULES_DIR = MODULES_ROOT
 DATA_ROOT = MODULES_DIR / "modules_data"
@@ -88,24 +91,58 @@ def _load_custom_prompts(data_dir: Path) -> str:
     return "\n\n".join(parts)
 
 
+def _load_encrypted_template(mod_dir: Path) -> str | None:
+    """模块自带加密任务模板（prompts/base.prompt.enc，引擎解密后使用）。
+
+    通用机制：模板内容属于模块（引擎不解读、不注入任何模块业务数据）；
+    模块作者以加密文件形式提供任务指示（生产者侧 crypto 加密）。
+    解密失败/文件缺失返回 None（render 层拒绝登记，不降级不兜底）。
+    """
+    enc = mod_dir / "prompts" / "base.prompt.enc"
+    if not enc.is_file():
+        return None
+    try:
+        from modules.common.crypto import decrypt
+        plain = decrypt(enc.read_text(encoding="utf-8"))
+        return plain if plain and str(plain).strip() else None
+    except Exception as e:
+        log.warning("[jobs] base.prompt.enc 解密失败（任务将拒绝登记）: %s", e)
+        return None
+
+
 def _compose_prompt(mod_dir: Path, data_dir: Path, settings: dict, template: dict,
                     output_path: str | None = None) -> str | None:
     """合成 job prompt（通用模板合成，不含任何模块业务知识）。
 
-    指示语唯一来源 = job.template.json 的 `prompt` 字段（模块作者必须写清任务指示）；
-    支持通用占位符 {date}/{module_data}/{output_path}/{settings:<键>}/{custom_prompts}。
-    缺 prompt 返回 None（render_job 层拒绝登记，无备胎）。
+    指示来源二选一（模块作者必须提供其一，否则拒绝登记）：
+    - job.template.json 的 `prompt` 字段（明文，支持通用占位符
+      {date}/{module_data}/{output_path}/{settings:<键>}/{custom_prompts}）
+    - 模块自带加密模板 prompts/base.prompt.enc（引擎解密；其后自动追加用户
+      自定义方向段——加密模板内无法写占位符，故由引擎代拼）
+    用户自定义方向段（web 导入的 prompts/custom/*.json）在两条路径下都会并入。
     """
     tpl_prompt = template.get("prompt")
-    if not tpl_prompt or not str(tpl_prompt).strip():
+    if tpl_prompt and str(tpl_prompt).strip():
+        ctx = {
+            "date": date.today().isoformat(),
+            "module_data": str(data_dir),
+            "output_path": str(output_path or ""),
+            "custom_prompts": _load_custom_prompts(data_dir),
+        }
+        return _apply_placeholders(str(tpl_prompt), ctx, settings)
+    base = _load_encrypted_template(mod_dir)
+    if base is None:
         return None
+    custom = _load_custom_prompts(data_dir)
+    if custom:
+        base = base.rstrip() + "\n\n" + custom
     ctx = {
         "date": date.today().isoformat(),
         "module_data": str(data_dir),
         "output_path": str(output_path or ""),
-        "custom_prompts": _load_custom_prompts(data_dir),
+        "custom_prompts": "",
     }
-    return _apply_placeholders(str(tpl_prompt), ctx, settings)
+    return _apply_placeholders(base, ctx, settings)
 
 
 def render_job(name: str) -> dict:
@@ -140,7 +177,7 @@ def render_job(name: str) -> dict:
     prompt = _compose_prompt(mod_dir, data_dir, settings, jt, output_path=str(output_dir))
     if not prompt:
         return {"ok": False,
-                "error": "job.template.json 缺少 prompt 字段（模块作者必须写清任务指示，无备胎）"}
+                "error": "job 缺少任务指示：job.template.json 需写清 prompt 或提供 prompts/base.prompt.enc"}
 
     job = {
         "name": jt.get("name", f"{name} job"),

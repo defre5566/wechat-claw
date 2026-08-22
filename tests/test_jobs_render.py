@@ -81,7 +81,7 @@ def test_render_job_no_prompt_rejected(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     r = jobs.render_job("Planner")
     assert not r["ok"]
-    assert "缺少 prompt 字段" in r["error"]
+    assert "任务指示" in r["error"]
 
 
 def test_render_job_custom_prompts_via_placeholder(tmp_path, monkeypatch):
@@ -103,6 +103,78 @@ def test_render_job_no_template(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     r = jobs.render_job("plain")
     assert not r["ok"] and "无 job.template.json" in r["error"]
+
+
+# ---------- 加密模板路径（模块自带 base.prompt.enc，引擎解密） ----------
+
+def _mk_enc_module(tmp_path, name="EncMod", base_text=None, template=None):
+    """无 prompt 字段、带 prompts/base.prompt.enc 的模块（Enviro 型：Planner 零变化）。"""
+    mod_dir = tmp_path / "modules" / name
+    data_dir = tmp_path / "modules" / "modules_data" / name
+    mod_dir.mkdir(parents=True)
+    (data_dir / "prompts" / "custom").mkdir(parents=True)
+    (mod_dir / "module.json").write_text(json.dumps({
+        "name": name, "job_template": "job.template.json",
+        "schedule_from_settings": [{"phase": "morning", "time_field": "morning_time"}],
+    }), encoding="utf-8")
+    (mod_dir / "job.template.json").write_text(json.dumps(template or {
+        "name": "简报", "slug": "briefing", "phase": "morning", "offset_min": 5,
+        "timeoutSeconds": 1800, "output_dir": "briefing",
+    }), encoding="utf-8")
+    (mod_dir / "prompts").mkdir(exist_ok=True)
+    (mod_dir / "prompts" / "base.prompt.enc").write_text(
+        base_text or "【加密模板】生成 {date} 简报，写入 {output_path}。", encoding="utf-8")
+    (data_dir / "settings.json").write_text(json.dumps({
+        "morning_time": "08:30", "briefing_topics": ["时政"],
+    }), encoding="utf-8")
+    return mod_dir, data_dir
+
+
+def test_render_job_encrypted_template_decrypted(tmp_path, monkeypatch):
+    """无 prompt 字段 + 有 base.prompt.enc → 引擎解密使用（Planner 零变化路径）。"""
+    _mk_enc_module(tmp_path)
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr("modules.common.crypto.decrypt", lambda s: s + "→解密")
+    r = jobs.render_job("EncMod")
+    assert r["ok"], r
+    assert "加密模板" in r["job"]["prompt"]
+    assert "→解密" in r["job"]["prompt"]
+    assert str(date.today().year) in r["job"]["prompt"]      # {date} 替换
+    assert "briefing" in r["job"]["prompt"]                  # {output_path} 替换
+
+
+def test_render_job_encrypted_template_appends_custom(tmp_path, monkeypatch):
+    """加密模板路径自动追加用户自定义方向段（引擎代拼，模板内无法写占位符）。"""
+    _, data_dir = _mk_enc_module(tmp_path)
+    (data_dir / "prompts" / "custom" / "科技.json").write_text(
+        json.dumps({"prompt": "侧重科技与产业"}), encoding="utf-8")
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr("modules.common.crypto.decrypt", lambda s: s)
+    r = jobs.render_job("EncMod")
+    assert r["ok"], r
+    assert "用户自定义方向 科技" in r["job"]["prompt"]
+    assert "侧重科技与产业" in r["job"]["prompt"]
+
+
+def test_render_job_encrypted_template_decrypt_failure_rejected(tmp_path, monkeypatch):
+    """base.enc 解密失败 → 拒绝登记（不降级不兜底）。"""
+    _mk_enc_module(tmp_path)
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr("modules.common.crypto.decrypt",
+                        lambda s: (_ for _ in ()).throw(RuntimeError("密钥缺失")))
+    r = jobs.render_job("EncMod")
+    assert not r["ok"]
+    assert "任务指示" in r["error"]
+
+
+def test_render_job_no_prompt_no_enc_rejected(tmp_path, monkeypatch):
+    """prompt 与 base.enc 都无 → 拒绝登记。"""
+    _mk_enc_module(tmp_path)
+    (tmp_path / "modules" / "EncMod" / "prompts" / "base.prompt.enc").unlink()
+    _setup(tmp_path, monkeypatch)
+    r = jobs.render_job("EncMod")
+    assert not r["ok"]
+    assert "任务指示" in r["error"]
 
 
 # ---------- sync_module_jobs（register 联动入口） ----------
