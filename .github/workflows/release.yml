@@ -72,6 +72,24 @@ jobs:
             } catch {}
           }
           Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      - name: Build deb package (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir -p debpkg/usr/bin debpkg/DEBIAN
+          cp dist/wechat-claw debpkg/usr/bin/wechat-claw
+          chmod +x debpkg/usr/bin/wechat-claw
+          cat > debpkg/DEBIAN/control <<EOF
+          Package: wechat-claw
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: wechat-claw <dev@wechat-claw.local>
+          Description: WeChat personal assistant bridge (single-file build)
+          EOF
+          dpkg-deb --build debpkg dist/wechat-claw-${VERSION}-linux-x64.deb
       - name: Rename artifact
         shell: bash
         run: |
