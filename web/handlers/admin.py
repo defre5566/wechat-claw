@@ -288,7 +288,7 @@ def optimize_persona(app, body: dict | None = None) -> dict:
     if not role_in and not lang_in:
         return {"ok": False, "error": "角色设定和语言习惯都为空，无法优化"}, 400
     from bridge.config import get as get_cfg
-    from bridge.config import resolve_opencode, xdg_env
+    from bridge.config import WORK_ROOT, resolve_opencode, xdg_env
     binary = resolve_opencode()
     if not binary:
         return {"ok": False, "error": "未找到 opencode 可执行文件（acp.command / PATH / ~/.opencode/bin）"}, 400
@@ -306,7 +306,11 @@ def optimize_persona(app, body: dict | None = None) -> dict:
     env = os.environ.copy()
     env.update(xdg_env())
     try:
-        r = subprocess.run([binary, "run", "-m", model, prompt], capture_output=True, text=True, timeout=120, env=env)
+        # cwd=数据根（=项目根）：opencode run 在此加载 AGENTS.md/opencode.jsonc，
+        # 否则进程继承 web 启动目录导致上下文错位
+        r = subprocess.run([binary, "run", "-m", model, prompt],
+                           capture_output=True, text=True, timeout=120, env=env,
+                           cwd=str(WORK_ROOT))
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "opencode 优化超时（120 秒），请稍后重试"}, 504
     output = (r.stdout or r.stderr or "").strip()

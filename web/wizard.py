@@ -470,6 +470,12 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:  # noqa: BLE001
             _log(f"[wizard] 请手动打开浏览器访问 {url}")
         _maybe_autostart_opencode(APP)
+        # Windows 入口解耦注册（幂等）：开始菜单快捷方式 + VBS 启动器（8650 探测 → 开浏览器）
+        try:
+            from web.handlers.service_up import ensure_win_shortcuts
+            ensure_win_shortcuts()
+        except Exception:  # noqa: BLE001  注册失败不阻塞 web 启动
+            pass
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

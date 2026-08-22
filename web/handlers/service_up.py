@@ -466,6 +466,23 @@ def handle(app, body: dict | None = None) -> dict:
     return {"ok": ok, "steps": steps}
 
 
+def ensure_win_shortcuts() -> None:
+    """web 启动即注册 Windows 入口（幂等）：开始菜单快捷方式 + VBS 启动器 + 卸载注册。
+
+    与 service_up 解耦：无论 bridge 是否服务化、向导是否走到「启动服务」步骤，
+    用户都有入口（VBS 探测 8650 → 未监听则启动 web → 等就绪 → 开浏览器）。
+    失败仅记录日志，不阻塞 web 启动。
+    """
+    if os.name != "nt" or SELFTEST:
+        return
+    try:
+        steps = _win_app_entries()
+        failed = [s for s in steps if not s["ok"]]
+        _log_web(f"ensure_win_shortcuts: {'完成' if not failed else f'部分失败 {failed[0].get("out", "")}'}")
+    except Exception as e:  # noqa: BLE001
+        _log_web(f"ensure_win_shortcuts 异常: {e}")
+
+
 # ---------- 管理后台「开机自动启动」开关（Windows UAC 提权；Linux/macOS 免提权） ----------
 
 def _bridge_running() -> bool:

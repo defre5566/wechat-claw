@@ -315,11 +315,24 @@ function openModal(name) {
     }).catch(e => toast(e.message, "error"));
   } else if (name === "city") {
     fetch("/cities.json").then(r => r.json()).then(cities => {
-      const node = modal("选择城市", `<input class="city-search" placeholder="搜索城市"><div class="city-list">${cities.slice(0, 24).map(([code, city]) => `<button class="city-item" data-code="${esc(code)}" data-city="${esc(city)}">${esc(city)}</button>`).join("")}</div><div class="modal-actions"><button class="btn btn-secondary btn-sm" data-locate>使用当前位置</button><button class="btn btn-primary btn-sm" data-close>完成</button></div>`);
-      $(".city-search", node).addEventListener("input", e => { const q = e.target.value.trim(); $$(".city-item", node).forEach(item => item.style.display = !q || item.dataset.city.includes(q) ? "" : "none"); });
-      $$(".city-item", node).forEach(item => item.onclick = async () => { try { await api.post("/api/profile/city", { code: item.dataset.code }); state.profile = await api.get("/api/profile"); node.remove(); render(); toast(`已设为所在城市：${item.dataset.city}`, "success"); } catch (e) { toast(e.message, "error"); } });
+      // 数据结构 [code, name, parent, pinyin, lat, lng]；初始显示市级（parent 为省级），
+      // 搜索过滤全量（省/市/区县都可选，天气按区级坐标查询）
+      const cityList = q => {
+        const kw = q.trim();
+        const all = kw ? cities.filter(c => c[1].includes(kw))
+                       : cities.filter(c => c[2] && c[2].slice(-4) === "0000");
+        return all.slice(0, 80).map(([code, cn]) =>
+          `<button class="city-item" data-code="${esc(code)}" data-city="${esc(cn)}">${esc(cn)}</button>`).join("");
+      };
+      const node = modal("选择城市", `<input class="city-search" placeholder="搜索城市（省/市/区县）"><div class="city-list">${cityList("")}</div><div class="modal-actions"><button class="btn btn-secondary btn-sm" data-locate>使用当前位置</button><button class="btn btn-primary btn-sm" data-close>完成</button></div>`);
+      const listEl = $(".city-list", node);
+      $(".city-search", node).addEventListener("input", e => { listEl.innerHTML = cityList(e.target.value); });
+      listEl.addEventListener("click", async e => {
+        const item = e.target.closest(".city-item"); if (!item) return;
+        try { await api.post("/api/profile/city", { code: item.dataset.code }); state.profile = await api.get("/api/profile"); node.remove(); render(); toast(`已设为所在城市：${item.dataset.city}`, "success"); } catch (err) { toast(err.message, "error"); }
+      });
       $("[data-locate]", node).onclick = () => locateCity(node);
-    }).catch(e => toast(e.message, "error"));
+    }).catch(e => toast("城市库加载失败：" + e.message, "error"));
   } else if (name === "habit") {
     const node = modal("添加偏好", `<div class="field-group"><label class="field">新的偏好或习惯<input id="habitInput" placeholder="例如：夜跑、喜欢喝茶"></label><div class="modal-actions"><button class="btn btn-primary btn-sm" data-habit-save>添加</button></div></div>`);
     $("[data-habit-save]", node).onclick = () => { const value = $("#habitInput", node).value.trim(); if (!value) return; $("#habitTags").insertAdjacentHTML("beforeend", `<span class="tag">${esc(value)}<button type="button" data-remove-habit="${esc(value)}">×</button></span>`); node.remove(); };
@@ -461,12 +474,13 @@ function renderWizard() {
             clearInterval(loginPollTimer);
             if (banner) { banner.className = "login-banner done"; banner.textContent = "✅ 登录成功"; }
             markDone(4);
-          } else if (s.status === "expired" || s.status === "error") {
+          } else if (s.status === "expired") {
             clearInterval(loginPollTimer);
             if (banner) { banner.className = "login-banner error"; banner.textContent = "二维码已失效，请点击刷新"; }
           }
+          // error/pending 等瞬时状态：不判失效，继续轮询等待
         }).catch(() => {});
-      }, 2000);
+      }, 1500);
     }).catch(e => {
       if (banner) { banner.className = "login-banner error"; banner.textContent = "二维码获取失败：" + e.message; }
     });
@@ -493,9 +507,9 @@ function renderWizard() {
     const actionBtn = current === 1 || current === 2 || current === 4 ? "" : `<div class="wizard-actions"><button class="btn btn-primary" id="wizardAction">${["开始体检", "检测 opencode", "开始装配", "生成配置", "获取二维码", "进入工作台"][current]} <span>→</span></button></div>`;
     const loginPanel = current === 4 ? `
       <div class="login-row">
-        <div class="qr-box" id="qrBox">二维码区域</div>
+        <div class="qr-box" id="qrBox">${done.has(4) ? '<div class="qr-done">✅</div>' : "二维码区域"}</div>
         <div class="login-side">
-          <div class="login-banner waiting" id="loginBanner">⏳ 获取二维码…</div>
+          <div class="login-banner ${done.has(4) ? "done" : "waiting"}" id="loginBanner">${done.has(4) ? "✅ 已登录（会话可复用）" : "⏳ 获取二维码…"}</div>
           <div class="login-actions">
             <button class="btn btn-primary" id="wizardAction">获取二维码 <span>→</span></button>
             <button class="btn btn-secondary" id="qrRefresh">↻ 刷新二维码</button>
@@ -513,8 +527,12 @@ function renderWizard() {
     if (current === 1) {
       $("#ocInstall").onclick = ocInstall;
       $("#ocRedetect").onclick = ocDetect;
-      ocDetect();
-      api.get("/api/opencode/status").then(d => { if (d.started && !d.done) ocPollStart(); }).catch(() => {});
+      // 状态优先：安装中 → 轮询（done 后 ocDetect）；已装完 → 直接检测渲染；
+      // 从未启动 → 检测。修复"装完必须刷新才显示已装"的竞态
+      api.get("/api/opencode/status").then(d => {
+        if (d.started) { if (!d.done) ocPollStart(); else ocDetect(); }
+        else ocDetect();
+      }).catch(() => ocDetect());
     }
     if (current === 2) {
       const asmArea = $("#asmArea");
