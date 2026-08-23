@@ -89,49 +89,54 @@ _GIT_MIRRORS = [
 
 
 def _git_clone(url: str, dest: Path) -> bool:
-    """下载仓库 ZIP 并解压（替代 git clone——镜像只代理 HTTP，不代理 git 协议）。
+    """克隆仓库到目标目录。
 
-    支持 Gitee（默认，国内快）和 GitHub（镜像兜底）两种源。
-    Gitee：https://gitee.com/{owner}/{repo}.git → 直接 ZIP 下载
-    GitHub：https://github.com/{owner}/{repo}.git → 镜像列表轮询 ZIP 下载
+    Gitee（默认，国内快）：git clone 直连（网络无阻）。
+    GitHub（兜底）：ZIP 下载 + 镜像轮询（受限网络适用）。
     """
-    import io
-    import urllib.request
-    import zipfile
-    zip_urls: list[str] = []
     if url.startswith("https://gitee.com/") and url.endswith(".git"):
-        repo_path = url[len("https://gitee.com/"):-len(".git")]
-        # Gitee ZIP 格式：/repository/archive/{branch}.zip
-        zip_urls.append(f"https://gitee.com/{repo_path}/repository/archive/main.zip")
+        # Gitee 直连 git clone（国内访问无问题）
+        try:
+            r = subprocess.run(
+                ["git", "clone", "--depth", "1", "--quiet", url, str(dest)],
+                capture_output=True, text=True, timeout=120,
+            )
+            return r.returncode == 0
+        except Exception:
+            return False
     if url.startswith("https://github.com/") and url.endswith(".git"):
+        # GitHub：ZIP 下载 + 镜像轮询
+        import io
+        import urllib.request
+        import zipfile
         repo_path = url[len("https://github.com/"):-len(".git")]
+        zip_urls = []
         for m in _GIT_MIRRORS:
             zip_urls.append(f"{m}/{repo_path}/archive/refs/heads/main.zip")
-    if not zip_urls:
-        return False
-    seen = set()
-    for zu in zip_urls:
-        if zu in seen:
-            continue
-        seen.add(zu)
-        try:
-            req = urllib.request.Request(zu, headers={"User-Agent": "wechat-claw-module-source"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = resp.read()
-            z = zipfile.ZipFile(io.BytesIO(data))
-            top = z.namelist()[0].split("/")[0] if z.namelist() else ""
-            if not top:
+        seen = set()
+        for zu in zip_urls:
+            if zu in seen:
                 continue
-            tmp = Path(tempfile.mkdtemp(prefix="wc-source-"))
-            z.extractall(tmp)
-            if (tmp / top).is_dir():
-                if dest.is_dir():
-                    shutil.rmtree(dest)
-                shutil.move(str(tmp / top), str(dest))
-            shutil.rmtree(tmp, ignore_errors=True)
-            return True
-        except Exception:
-            continue
+            seen.add(zu)
+            try:
+                req = urllib.request.Request(zu, headers={"User-Agent": "wechat-claw-module-source"})
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = resp.read()
+                z = zipfile.ZipFile(io.BytesIO(data))
+                top = z.namelist()[0].split("/")[0] if z.namelist() else ""
+                if not top:
+                    continue
+                tmp = Path(tempfile.mkdtemp(prefix="wc-source-"))
+                z.extractall(tmp)
+                if (tmp / top).is_dir():
+                    if dest.is_dir():
+                        shutil.rmtree(dest)
+                    shutil.move(str(tmp / top), str(dest))
+                shutil.rmtree(tmp, ignore_errors=True)
+                return True
+            except Exception:
+                continue
+        return False
     return False
 
 
