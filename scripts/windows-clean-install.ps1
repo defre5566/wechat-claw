@@ -52,11 +52,11 @@ Ok "cloned"
 
 Step "6/7 Create venv and install dependencies..."
 Push-Location $Path
-python -m venv .venv
-& ".\.venv\Scripts\pip.exe" install -r requirements.txt
-if ($LASTEXITCODE -ne 0) { Pop-Location; throw "pip install requirements failed" }
-& ".\.venv\Scripts\pip.exe" install -e ".\vendor\wechat_agent_sdk"
-if ($LASTEXITCODE -ne 0) { Pop-Location; throw "pip install sdk failed" }
+ python -m venv .venv
+ & ".\.venv\Scripts\pip.exe" install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+ if ($LASTEXITCODE -ne 0) { Pop-Location; throw "pip install requirements failed" }
+ & ".\.venv\Scripts\pip.exe" install -i https://pypi.tuna.tsinghua.edu.cn/simple -e ".\vendor\wechat_agent_sdk"
+ if ($LASTEXITCODE -ne 0) { Pop-Location; throw "pip install sdk failed" }
 & ".\.venv\Scripts\python.exe" patches\apply_patches.py --vendor --check-only
 Pop-Location
 Ok "dependencies ready (expect 4x [SKIP] above)"

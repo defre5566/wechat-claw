@@ -29,7 +29,7 @@ def ensure_pyinstaller() -> None:
         import PyInstaller  # noqa: F401
     except ImportError:
         print("[build] 安装 PyInstaller ...")
-        r = subprocess.run([str(VENV_PY), "-m", "pip", "install", "pyinstaller"], cwd=str(ROOT))
+        r = subprocess.run([str(VENV_PY), "-m", "pip", "install", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", "pyinstaller"], cwd=str(ROOT))
         if r.returncode != 0:
             sys.exit("[build] PyInstaller 安装失败")
 

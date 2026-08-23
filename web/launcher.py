@@ -39,8 +39,8 @@ def _build_venv() -> None:
     if r.returncode != 0:
         sys.exit("[launcher] venv 创建失败")
     for cmd in (
-        [str(PIP), "install", "-r", str(ROOT / "requirements.txt")],
-        [str(PIP), "install", "-e", str(ROOT / "vendor" / "wechat_agent_sdk")],
+        [str(PIP), "install", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", "-r", str(ROOT / "requirements.txt")],
+        [str(PIP), "install", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", "-e", str(ROOT / "vendor" / "wechat_agent_sdk")],
     ):
         print(f"[launcher] 运行: {' '.join(cmd)}")
         r = subprocess.run(cmd)
