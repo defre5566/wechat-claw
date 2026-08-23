@@ -142,6 +142,9 @@ def test_install_windows(iso, monkeypatch):
     args = ran[0]
     assert args[0] == "schtasks" and "/sc" in args and "daily" in args and "/st" in args and "08:00" in args
     assert "wechat-claw-job-Planner-morning" in args
+    # 工作目录包装：/tr 必须含 cmd /c + cd /d（schtasks 无 workdir 参数，防 CWD=System32 找不到 bridge）
+    tr = args[args.index("/tr") + 1]
+    assert tr.startswith("cmd /c ") and 'cd /d "' in tr and "bridge.opencode_jobs" in tr
 
 
 def test_install_macos(iso, monkeypatch):

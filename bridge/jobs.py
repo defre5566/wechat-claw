@@ -263,7 +263,7 @@ def sync_jobs(name: str) -> dict:
 
     r["install_hint"] = (
         f"job json（数据区留存）: {r['job_file']}\n"
-        f"已自动登记 opencode scheduler: {inst['slug']}（OnCalendar={inst['on_calendar']}）"
+        f"已自动登记 opencode scheduler: {inst['slug']}（timers={inst.get('timers') or '?'}）"
     )
     return r
 

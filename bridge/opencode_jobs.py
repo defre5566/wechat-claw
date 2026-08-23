@@ -477,10 +477,16 @@ def _install_launchd(slug: str, job_path: Path, parsed: dict, dry: bool) -> list
 
 
 def _install_windows_timers(slug: str, job_path: Path, plans: list[dict], dry: bool) -> list[str]:
-    """Windows：schtasks 计划任务（列表 cron 拆多任务；/f 幂等覆盖）。"""
+    """Windows：schtasks 计划任务（列表 cron 拆多任务；/f 幂等覆盖）。
+
+    工作目录：schtasks 无 /workdir 参数（Task Scheduler 默认 CWD=System32，python -m 找不到
+    bridge 包）——用 cmd /c "cd /d <工作目录> && ..." 包装，与 systemd WorkingDirectory 对齐。
+    """
     cmd = _supervisor_cmd(job_path)
-    # /tr 引号包裹：整条命令在引号内，内部参数引号用 \" 转义
-    tr = " ".join(f'"{c}"' if (" " in c or c.endswith(".exe")) else c for c in cmd)
+    workdir = job_path.parent
+    # 外层 /tr 用双引号包整条，内部引号转义：cmd /c "cd /d <wd> && "python" -m ... <job.json>"
+    inner = " && ".join([f'cd /d "{workdir}"', " ".join(f'"{c}"' if (" " in c or c.endswith(".exe")) else c for c in cmd)])
+    tr = f"cmd /c \"{inner}\""
     tasks: list[str] = []
     for i, plan in enumerate(plans):
         tn = f"wechat-claw-job-{slug}-{i + 1}" if len(plans) > 1 else f"wechat-claw-job-{slug}"
@@ -599,8 +605,26 @@ def _systemctl(*args: str) -> None:
 # ---------- supervisor 执行器（平台定时器到点触发；移植 supervisor.pl） ----------
 
 def _pid_alive(pid: int) -> bool:
+    """进程存活探测：POSIX 用 os.kill(pid,0)；Windows 用 OpenProcess（signal 0 不生效）。"""
     if not pid:
         return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, int(pid))
+            if not handle:
+                return False  # 无法打开（不存在或权限不足）→ 视为不可用
+            try:
+                code = ctypes.c_ulong()
+                ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+                if not ok or code.value == 259:  # 259 = STILL_ACTIVE
+                    return True
+                return False
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        except Exception:
+            return False
     try:
         os.kill(pid, 0)
         return True

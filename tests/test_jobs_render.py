@@ -244,3 +244,17 @@ def test_unregister_jobs(tmp_path, monkeypatch):
     monkeypatch.setattr("bridge.opencode_jobs.uninstall_job", fake_uninstall)
     r = jobs.unregister_jobs("Planner")
     assert r["ok"] and calls["module"] == "Planner"
+
+# ---------- 跨平台化回归：install_job 返回 timers（无 on_calendar 键） ----------
+
+def test_sync_jobs_consumes_timers_field(tmp_path, monkeypatch):
+    """install_job 返回含 timers（无 on_calendar）→ sync_jobs 不抛 KeyError，hint 带 timers。"""
+    _mk_module(tmp_path, settings={"planner_on": True, "morning_time": "08:30", "briefing_topics": ["时政"]})
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "bridge.opencode_jobs.install_job",
+        lambda **kw: {"ok": True, "slug": "Planner-morning-briefing", "timers": ["wechat-claw-job-Planner-morning-briefing"]},
+    )
+    r = jobs.sync_jobs("Planner")
+    assert r["ok"], r
+    assert "timers=" in r["install_hint"] and "Planner-morning-briefing" in r["install_hint"]
