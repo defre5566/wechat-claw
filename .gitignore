@@ -45,6 +45,9 @@ wechat-claw_modules_official/
 # 开发日志（不入库不推送）
 devlog/
 
+# 旧版前端备份（保留本地，不上传）
+web/bak/
+
 # 本机生成配置（部署产物，不入库）
 opencode.jsonc
 
