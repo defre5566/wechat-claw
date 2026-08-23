@@ -502,6 +502,11 @@ def main(argv: list[str] | None = None) -> int:
             _log(f"[wizard] bridge 启动失败: {e}")
             return 1
         return 0
+    # 打包形态 job 执行器：`wechat-claw -m bridge.opencode_jobs supervisor <job.json>`
+    # （平台定时器到点触发；源码形态由 venv python 直接调用同命令）
+    if len(argv) >= 2 and argv[0] == "-m" and argv[1] == "bridge.opencode_jobs":
+        from bridge import opencode_jobs
+        return opencode_jobs.main(argv[2:])
     port = PORT
     for i, a in enumerate(argv):
         if a == "--port" and i + 1 < len(argv):

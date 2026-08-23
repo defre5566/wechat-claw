@@ -36,7 +36,6 @@ datas = [
     (str(_ROOT / "config.yaml.example"), "."),
     (str(_ROOT / "AGENTS.md"), "."),
     (str(_ROOT / "opencode.jsonc.example"), "."),
-    (str(_ROOT / "vendor" / "opencode-scheduler"), "vendor/opencode-scheduler"),
 ]
 if sys.platform == "win32":
     # Windows 服务化依赖 nssm（service_up 从 RESOURCE_ROOT 读取）
