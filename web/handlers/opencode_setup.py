@@ -164,7 +164,7 @@ def install(app, body: dict | None = None) -> dict:
         return {"ok": True, "already": True, "version": d["version"]}
     if app.job_running():
         return {"ok": False, "error": "已有任务运行中"}, 409
-    app.start_job("opencode_install", build_install_commands(), on_done=install_done)
+    app.start_job("opencode_install", build_install_commands(), on_done=lambda ok: install_done(app, ok))
     return {"ok": True, "started": True}
 
 
