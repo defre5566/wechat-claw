@@ -28,6 +28,7 @@ log = logging.getLogger("wechat-config")
 # 用户数据按平台规范落用户目录（exe 是部署包，不是数据包）。
 _FROZEN = getattr(_sys, "frozen", False)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent          # 源码形态项目根
+VERSION = "0.1.2"  # 发版版本号（exe 形态用此值；源码形态优先 git describe --tags）
 DEPLOY_ROOT = (Path(_sys.executable).resolve().parent if _FROZEN else PROJECT_ROOT)  # 程序根（exe/项目）
 RESOURCE_ROOT = (Path(getattr(_sys, "_MEIPASS", PROJECT_ROOT)) if _FROZEN else PROJECT_ROOT)  # 资源根
 

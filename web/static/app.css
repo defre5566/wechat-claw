@@ -136,7 +136,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .settings-final { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto; gap: 14px; align-items: stretch; }
 .settings-final > * { min-width: 0; }
 .service-log-final { grid-column: 1; grid-row: 1; min-height: 280px; }
-.theme-final { grid-column: 2; grid-row: 1; min-height: 280px; }
+.theme-final { grid-column: 2; grid-row: 1; }
 .security-final { grid-column: 1; grid-row: 2; min-height: 150px; }
 .advanced-final { grid-column: 2; grid-row: 2; min-height: 150px; }
 .service-hero-row { display: flex; align-items: center; gap: 12px; margin-top: 25px; }
@@ -269,7 +269,7 @@ textarea { resize: vertical; line-height: 1.6; }
 .settings-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: stretch; }
 .settings-row-1 > *, .settings-row-2 > * { min-width: 0; grid-column: auto; grid-row: auto; }
 .service-log-final { min-height: 280px; }
-.theme-final { min-height: 280px; }
+
 .security-final, .advanced-final { min-height: 150px; }
 .service-statuses { display: grid; gap: 6px; text-align: right; }
 .service-statuses span { font-size: 11.5px; color: var(--text-secondary); }
@@ -279,6 +279,12 @@ textarea { resize: vertical; line-height: 1.6; }
 .mini-log > span { flex: 1; }
 .mini-log strong, .mini-log small { display: block; }
 .mini-log small { margin-top: 2px; color: var(--text-tertiary); font-size: 11px; }
+
+.service-status-line { display: flex; align-items: center; gap: 8px; margin-top: 20px; padding: 12px 0; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-secondary); }
+.service-status-line .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+.service-status-line .status-dot.fail { background: var(--text-tertiary); }
+.service-status-line strong { font-weight: 600; color: var(--text); }
+.service-module-count { margin-left: auto; color: var(--text-tertiary); font-size: 11.5px; }
 .log-line-dot.muted { background: #d4b88e; }
 .service-log-final > .btn { margin-top: 2px; }
 

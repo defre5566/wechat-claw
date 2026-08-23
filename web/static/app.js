@@ -14,6 +14,7 @@ const state = {
   autostartPoll: null,
   serviceStatus: null,
   statusTimer: null,
+  version: null,
   mode: localStorage.getItem("wc-mode") || "light",
   accent: localStorage.getItem("wc-accent") || "amber",
   homeCards: [],
@@ -101,7 +102,7 @@ function shell(content) {
 }
 function modal(title, body) {
   const node = document.createElement("div"); node.className = "modal-backdrop";
-  node.innerHTML = `<section class="modal"><header><h2>${title}</h2><button class="btn btn-quiet" data-close>关闭</button></header><div class="modal-body">${body}</div></section>`;
+  node.innerHTML = `<section class="modal"><header><h2>${title}</h2><button class="btn btn-quiet" data-close>✕</button></header><div class="modal-body">${body}</div></section>`;
   document.body.append(node);
   node.addEventListener("click", e => { if (e.target === node || e.target.closest("[data-close]")) node.remove(); });
   return node;
@@ -112,12 +113,14 @@ function home() {
   const current = state.weather?.current, hourly = state.weather?.hourly || [];
   const city = loc.city || "还未设置";
   const habits = profile.habits || [];
+  const st = state.serviceStatus || {};
+  const bridgeCls = st.bridge_running ? "ok" : "fail";
   const suggestion = habits.includes("夜跑") ? "一天的工作结束，要不，晚上出去跑跑？" : "今天也慢慢来，留一点时间给自己。";
   const pref = habits.length ? `我记得你喜欢${esc(habits.slice(0, 3).join("、"))}。` : "在用户与助理中完善兴趣和生活习惯，我会更了解你。";
   const pluginCards = cards().map(pluginCard).join("");
-  return `<section class="page"><section class="hero"><div class="hero-copy"><span class="kicker">${esc(dateLine())}</span><h1>${greeting()}</h1><p>${esc(userName())}，${esc(assistantName())}会在这里安静地陪你处理日常。</p><div class="hero-status"><i class="status-dot"></i>已连接</div></div><div class="hero-art"><div class="assistant-orb">✦</div></div></section><section class="dashboard-grid" id="homeGrid">
+  return `<section class="page"><section class="hero"><div class="hero-copy"><span class="kicker">${esc(dateLine())}</span><h1>${greeting()}</h1><p>${esc(userName())}，${esc(assistantName())}会在这里安静地陪你处理日常。</p><div class="hero-status"><i class="status-dot ${bridgeCls}"></i>${st.bridge_running ? "服务在线" : "服务离线"} · 模块 ${st.module_count ?? state.modules.length} 个已加载</div></div><div class="hero-art"><div class="assistant-orb">✦</div></div></section><section class="dashboard-grid" id="homeGrid">
     <article class="card dashboard-card span-7"><div class="card-head"><div><span class="card-label">最近</span><h2>最近活动</h2></div><button class="btn btn-secondary btn-sm" data-open="logs">查看日志</button></div><div class="activity-meta"><span>${enabled.length} 个模块运行中</span><span>${modules.length} 个已安装</span><span>今日发送暂无数据</span></div><div class="activity-empty"><i>◷</i><p>最近还没有新的活动。<small>完整记录可以在运行日志中查看。</small></p></div></article>
-    <article class="card dashboard-card weather ${weatherClass()} span-5"><div class="card-head"><div><span class="card-label">天气</span></div><button class="btn btn-secondary btn-sm" data-open="city">设置城市</button></div>${current ? `<div class="weather-main"><div class="weather-city-temp"><span class="weather-city">${esc(city)}</span><strong class="weather-temp">${current.temperature}°</strong></div><span class="weather-desc">${esc(current.emoji)} ${esc(current.description)} · 风速 ${current.wind_speed} km/h</span></div><div class="forecast-title">未来 3 小时</div><div class="forecast">${hourly.slice(1, 4).map(x => `<div><time>${esc(x.time)}</time><strong>${x.temperature}°</strong><small>${esc(x.description)}</small></div>`).join("")}</div>` : `<div class="weather-main"><div class="weather-city-temp"><span class="weather-city">${esc(city)}</span><strong class="weather-temp">—</strong></div><span class="weather-desc">天气暂时无法获取</span></div>`}</article>
+    <article class="card dashboard-card weather ${weatherClass()} span-5"><div class="card-head"><div><span class="card-label">天气</span></div><button class="btn btn-secondary btn-sm" data-open="city">设置城市</button></div>${!loc.city ? `<div class="weather-main"><div class="weather-city-temp"><span class="weather-city">待设置城市</span><strong class="weather-temp">—</strong></div><span class="weather-desc">设置城市后可查看天气</span></div>` : current ? `<div class="weather-main"><div class="weather-city-temp"><span class="weather-city">${esc(city)}</span><strong class="weather-temp">${current.temperature}°</strong></div><span class="weather-desc">${esc(current.emoji)} ${esc(current.description)} · 风速 ${current.wind_speed} km/h</span></div><div class="forecast-title">未来 3 小时</div><div class="forecast">${hourly.slice(1, 4).map(x => `<div><time>${esc(x.time)}</time><strong>${x.temperature}°</strong><small>${esc(x.description)}</small></div>`).join("")}</div>` : `<div class="weather-main"><div class="weather-city-temp"><span class="weather-city">${esc(city)}</span><strong class="weather-temp">—</strong></div><span class="weather-desc">天气暂时无法获取</span></div>`}</article>
     <article class="card suggestion span-12"><div class="suggestion-icon">✦</div><div class="suggestion-copy"><span class="card-label">给你的建议</span><h2>${suggestion}</h2><p>${pref}</p></div><button class="btn btn-secondary btn-sm" data-nav="user">编辑偏好</button></article>${pluginCards}
   </section></section>`;
 }
@@ -125,24 +128,20 @@ function home() {
 function settings() {
   const enabled = state.modules.filter(x => x.enabled).length;
   const st = state.serviceStatus || {};
-  const bridgeTxt = st.bridge_running ? "运行中" : "未运行";
-  const bridgeCls = st.bridge_running ? "ok" : "fail";
+  const bridgeOk = st.bridge_running;
+  const bridgeCls = bridgeOk ? "ok" : "fail";
   const modeTxt = st.autostart_mode === "system" ? "系统服务·开机自启" : st.autostart_mode === "user" ? "用户级·登录自启" : "未开启自启";
   return `<section class="page secondary-page">${heading("基础设置", "管理服务、外观、自启动和安全选项。")}<div class="settings-rows">
     <div class="settings-row-1">
-      <article class="card panel service-log-final"><div class="panel-head"><div><span class="card-label">SERVICE</span><h2>服务与自启动</h2><p>由 wechat-claw 管理本地服务。</p></div><div class="service-statuses"><span class="${bridgeCls}"><i class="status-dot"></i>bridge ${bridgeTxt}</span><span><i class="status-dot"></i>Web 服务 · 正常</span><span><i class="status-dot"></i>模块服务 · ${st.module_count ?? state.modules.length} 个已加载</span></div></div>
-        <div class="service-hero-row"><div class="service-orb">✦</div><div><strong>开机自动启动 bridge</strong><small>${modeTxt}${state.autostartMode === "user" ? " · 开启后升级为开机自启（需 UAC）" : " · 登录系统后自动启动微信消息桥接"}</small></div>${toggle(state.autostart, "autostart")}</div>
-        <div class="mini-log-list">
-          <div class="mini-log"><i class="log-line-dot ${bridgeCls}"></i><span><strong>bridge</strong><small>${st.bridge_running ? "运行中 · 端口探测正常" : "未运行 · 可在上方开启自启动或手动启动"}</small></span></div>
-          <div class="mini-log"><i class="log-line-dot"></i><span><strong>系统</strong><small>管理服务运行正常 · 来自运行日志</small></span></div>
-        </div>
-        <button class="btn btn-secondary btn-sm" data-open="logs">查看完整日志</button>
+      <article class="card panel service-log-final"><div class="panel-head"><div><span class="card-label">SERVICE</span><h2>服务与自启动</h2><p>由 wechat-claw 管理本地服务。</p></div></div>
+        <div class="service-hero-row"><div class="service-orb">✦</div><div><strong>开机自动启动服务</strong><small>${modeTxt}${state.autostartMode === "user" ? " · 开启后升级为开机自启（需 UAC）" : " · 登录系统后自动启动微信消息桥接"}</small></div>${toggle(state.autostart, "autostart")}</div>
+        <div class="service-status-line"><span class="status-dot ${bridgeCls}"></span><strong>服务状态</strong>${bridgeOk ? " · 运行中" : " · 未运行"}<span class="service-module-count">${st.module_count ?? state.modules.length} 个模块已加载</span>${bridgeOk ? `<button class="btn btn-secondary btn-sm" data-open="logs">查看完整日志</button>` : `<button class="btn btn-primary btn-sm" data-start>启动</button>`}</div>
       </article>
       <article class="card panel theme-final"><div class="panel-head"><div><span class="card-label">APPEARANCE</span><h2>主题外观</h2><p>明暗模式和主色独立设置。</p></div><span class="panel-symbol">◐</span></div>${themeCard()}</article>
     </div>
     <div class="settings-row-2">
       <article class="card panel security-final"><div class="panel-head"><div><span class="card-label">SECURITY</span><h2>管理密码</h2><p>修改进入后台所需的管理密码。</p></div><span class="panel-symbol">⌁</span></div><button class="btn btn-secondary btn-sm" data-open="password">修改密码</button></article>
-      <article class="card panel advanced-final"><div class="panel-head"><div><span class="card-label">ADVANCED</span><h2>高级运行配置</h2><p>运行参数、文件发送规则和其他高级选项。</p></div><span class="panel-symbol">⚙</span></div><button class="btn btn-secondary btn-sm" data-open="advanced">打开高级设置</button></article>
+      <article class="card panel advanced-final"><div class="panel-head"><div><span class="card-label">ADVANCED</span><h2>高级运行配置</h2><p>${state.version ? `当前版本 v${state.version.current}${state.version.is_latest ? " · 当前为最新版本" : " · 最新版本 v" + state.version.latest + " · " + (state.version.has_git ? '<button class="btn btn-secondary btn-sm" data-update="gitpull">git pull 更新</button>' : '<button class="btn btn-primary btn-sm" data-update="download">下载最新版</button>')}` : "运行参数、文件发送规则和其他高级选项。"}</p></div><span class="panel-symbol">⚙</span></div><button class="btn btn-secondary btn-sm" data-open="advanced">打开高级设置</button></article>
     </div>
   </div></section>`;
 }
@@ -176,13 +175,14 @@ function modules() {
 }
 
 async function loadData() {
-  const [profile, modules, sources, weather, autostart, status] = await Promise.all([
+  const [profile, modules, sources, weather, autostart, status, version] = await Promise.all([
     api.get("/api/profile"),
     api.get("/api/admin/modules"),
     api.get("/api/admin/sources"),
     api.get("/api/admin/weather").catch(() => null),
     api.get("/api/admin/autostart").catch(() => null),
     api.get("/api/admin/status").catch(() => null),
+    api.get("/api/admin/version").catch(() => null),
   ]);
   state.profile = profile;
   state.modules = modules.modules || [];
@@ -193,6 +193,7 @@ async function loadData() {
     state.autostart = autostart.mode !== "none";
   }
   if (status?.ok) state.serviceStatus = status;
+  if (version?.ok) state.version = version;
   clearTimeout(state.statusTimer);
   state.statusTimer = setTimeout(async () => { try { const s = await api.get("/api/admin/status"); if (s?.ok) { state.serviceStatus = s; if (state.page === "settings") render(); } } catch (e) { /* 静默 */ } }, 15000);
 }
@@ -250,6 +251,15 @@ function bind() {
     }
   });
   $$('[data-open]').forEach(b => b.onclick = () => openModal(b.dataset.open));
+  $$('[data-start]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = "启动中…";
+    try { const d = await api.post("/api/admin/start"); if (!d.ok) throw new Error("启动失败"); toast("bridge 已启动", "success"); setTimeout(loadData, 2000); } catch (e) { toast(e.message, "error"); b.disabled = false; b.textContent = "启动"; }
+  });
+  $$('[data-update="gitpull"]').forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = "更新中…";
+    try { const d = await api.post("/api/admin/update/gitpull"); if (!d.ok) throw new Error(d.error || "更新失败"); toast("更新成功，请重启 web 服务", "success"); setTimeout(loadData, 3000); } catch (e) { toast(e.message, "error"); b.disabled = false; b.textContent = "git pull 更新"; }
+  });
+  $$('[data-update="download"]').forEach(b => b.onclick = () => { window.open("https://github.com/defre5566/wechat-claw/releases/latest", "_blank"); });
   $$('[data-toast]').forEach(b => b.onclick = () => toast(b.dataset.toast));
   $("[data-card-manager]")?.addEventListener("click", openCardManager);
   $$('[data-remove-card]').forEach(b => b.onclick = () => { const node = b.closest("[data-plugin-card]"); if (node) node.remove(); const next = cards().filter(x => x !== b.dataset.removeCard); localStorage.setItem(CARDS_KEY, JSON.stringify(next)); toast("卡片已移除"); });

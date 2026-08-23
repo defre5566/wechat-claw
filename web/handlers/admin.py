@@ -751,3 +751,61 @@ def status_get(app, body: dict | None = None) -> dict:
         "autostart_mode": st.get("mode", "none"),
         "web_ok": True,
     }
+
+
+def start_bridge(app, body: dict | None = None) -> dict:
+    """手动启动 bridge（基础设置页「启动」按钮调用）。"""
+    from web.handlers.service_up import _spawn_bridge_now
+    steps = _spawn_bridge_now()
+    ok = all(s.get("ok") for s in steps)
+    return {"ok": ok, "steps": steps}
+
+
+def version_get(app, body: dict | None = None) -> dict:
+    """版本检测：当前版本（源码 git describe / exe VERSION 常量）+ 最新 release 版本。"""
+    import subprocess
+    from bridge.config import VERSION
+    import json, urllib.request
+    # 当前版本
+    has_git = False
+    current = VERSION
+    try:
+        r = subprocess.run(["git", "describe", "--tags", "--always"], capture_output=True, text=True, timeout=10)
+        if r.returncode == 0 and r.stdout.strip():
+            current = r.stdout.strip()
+            has_git = True
+    except Exception:
+        pass
+    # 最新版本
+    latest = VERSION
+    download_url = ""
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/defre5566/wechat-claw/releases/latest",
+            headers={"User-Agent": "wc-version", "Accept": "application/vnd.github+json"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            latest = (data.get("tag_name") or "").lstrip("v")
+            assets = data.get("assets") or []
+            win = next((a for a in assets if "windows" in (a.get("name") or "")), None)
+            if win:
+                download_url = win.get("browser_download_url") or ""
+            if not download_url and data.get("html_url"):
+                download_url = data["html_url"]
+    except Exception:
+        latest = VERSION
+    is_latest = current == latest or current.lstrip("v") == latest.lstrip("v")
+    return {"ok": True, "current": current, "latest": latest, "is_latest": is_latest, "has_git": has_git, "download_url": download_url}
+
+
+def gitpull_get(app, body: dict | None = None) -> dict:
+    """源码 git pull 更新（高级设置页按钮调用）。"""
+    import subprocess
+    try:
+        r = subprocess.run(["git", "pull"], capture_output=True, text=True, timeout=60, cwd=str(DATA_ROOT))
+        if r.returncode != 0:
+            return {"ok": False, "error": (r.stderr or r.stdout)[:500]}
+        return {"ok": True, "output": (r.stdout or "")[:500]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
