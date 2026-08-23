@@ -49,7 +49,6 @@ devlog/
 web/bak/
 
 # opencode 二进制（构建时手动放入，不跟踪）
-vendor/opencode/
 
 # 审阅报告（本地产物，不入库）
 ura-*.md
