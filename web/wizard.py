@@ -470,24 +470,6 @@ def _maybe_autostart_opencode(app: WizardApp) -> bool:
         _log("[wizard] opencode 未安装，已在后台启动自动安装（web 界面可看进度）")
         return True
     return False
-
-
-def _wait_opencode_installed(timeout: float = 600.0) -> None:
-    """等待 opencode 安装完成（页面打开前就绪，避免误报"未检测到"）。
-
-    轮询 detect_installed（每 2s）；超时兜底继续（不阻塞 web 启动）。
-    """
-    import time
-    from web.handlers import opencode_setup
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if opencode_setup.detect_installed():
-            _log("[wizard] opencode 安装完成")
-            return
-        time.sleep(2)
-    _log(f"[wizard] 等待 opencode 安装超时（{int(timeout)}s），继续启动")
-
-
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
     # 打包形态 bridge 模式：`wechat-claw -m bridge.main`（service_up / nssm 启动命令）
@@ -519,10 +501,7 @@ def main(argv: list[str] | None = None) -> int:
     url = f"http://{HOST}:{port}/"
     _log(f"[wizard] 服务已启动: {url}")
     if not SELFTEST:
-        # 未装 opencode → 后台自动安装并等待完成后再开浏览器（避免页面误报未检测到）；
-        # 已安装 → 跳过等待直接开浏览器
-        if _maybe_autostart_opencode(APP):
-            _wait_opencode_installed()
+        _maybe_autostart_opencode(APP)
         try:
             webbrowser.open(url)
         except Exception:  # noqa: BLE001

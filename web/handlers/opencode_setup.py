@@ -29,12 +29,19 @@ _MIRRORS = [
     "https://github.moeyy.xyz/https://github.com",
     "https://mirror.ghproxy.com/https://github.com",
 ]
+# raw.githubusercontent.com 镜像（POSIX 安装脚本用，与 _MIRRORS 独立）
+_RAW_MIRRORS = [
+    "https://ghproxy.com/https://raw.githubusercontent.com",
+    "https://github.moeyy.xyz/https://raw.githubusercontent.com",
+    "https://mirror.ghproxy.com/https://raw.githubusercontent.com",
+]
 
 # 已知风险（如实声明）：curl|bash 无 checksum 校验（官方脚本动态逻辑无法固定摘要），
 # 信任 https://opencode.ai/install 脚本本身；对供应链敏感者可手动安装后点「重新检测」
-_POSIX_CMD = "curl -fsSL --retry 3 '{}' | bash -s -- --no-modify-path".format(
-    "' || curl -fsSL --retry 3 '".join(m + "/anomalyco/opencode/main/scripts/install.sh" for m in _MIRRORS)
-)
+_POSIX_CMD = "( " + " || ".join(
+    "curl -fsSL --retry 3 '" + m + "/anomalyco/opencode/main/scripts/install.sh'"
+    for m in _RAW_MIRRORS
+) + " ) | bash -s -- --no-modify-path"
 # Windows：官方 release zip（x64），下载解压即可，无管道执行远程脚本
 _WIN_ZIP_URL = _MIRRORS[0] + "/anomalyco/opencode/releases/latest/download/opencode-windows-x64.zip"
 
