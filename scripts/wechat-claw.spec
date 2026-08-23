@@ -30,7 +30,8 @@ def _walk(src: str, dst: str) -> list[tuple[str, str]]:
         if f.is_dir() or "__pycache__" in f.parts or f.suffix == ".pyc":
             continue
         rel = f.relative_to(src_p)
-        out.append((str(f), str(Path(dst) / rel)))
+        # 统一正斜杠（PyInstaller 内部用 POSIX 路径，Windows 反斜杠可能触发转义问题）
+        out.append((str(f), str(Path(dst) / rel).replace("\\", "/")))
     return out
 
 
