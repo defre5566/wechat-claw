@@ -29,6 +29,11 @@ hiddenimports += [
 # vendor SDK 为 editable 安装（PEP 660），PyInstaller 静态分析收集不到，显式全量收集
 hiddenimports += ["wechat_agent_sdk"] + collect_submodules("wechat_agent_sdk")
 
+# bridge 核心（函数内动态 import，静态分析看不到）
+hiddenimports += ["bridge"] + collect_submodules("bridge")
+# modules 平台基础设施（同理，动态加载）
+hiddenimports += ["modules"] + collect_submodules("modules")
+
 # 数据文件（打包后位于 _MEIPASS 根，RESOURCE_ROOT 逻辑读取）
 datas = [
     (str(_ROOT / "web" / "static"), "web/static"),
@@ -36,6 +41,7 @@ datas = [
     (str(_ROOT / "config.yaml.example"), "."),
     (str(_ROOT / "AGENTS.md"), "."),
     (str(_ROOT / "opencode.jsonc.example"), "."),
+    (str(_ROOT / "patches"), "patches"),
 ]
 if sys.platform == "win32":
     # Windows 服务化依赖 nssm（service_up 从 RESOURCE_ROOT 读取）
