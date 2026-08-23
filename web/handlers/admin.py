@@ -732,3 +732,22 @@ def autostart_set(app, body: dict | None = None) -> dict:
     body = body or {}
     from web.handlers.service_up import autostart_set as _set
     return _set(bool(body.get("on", False)))
+
+
+def status_get(app, body: dict | None = None) -> dict:
+    """服务运行状态（欢迎区真实检测）：bridge 运行 + 模块数 + 自启模式 + web 自身。"""
+    from web.handlers.service_up import autostart_status, _bridge_running
+    from modules.registry_index import build_index
+    try:
+        mods = build_index()
+        module_count = len(mods)
+    except Exception:
+        module_count = 0
+    st = autostart_status()
+    return {
+        "ok": True,
+        "bridge_running": _bridge_running(),
+        "module_count": module_count,
+        "autostart_mode": st.get("mode", "none"),
+        "web_ok": True,
+    }

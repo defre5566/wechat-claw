@@ -448,8 +448,21 @@ echo 微信登录凭证（如需彻底清除）：%USERPROFILE%\\.wechat-agent-s
 
 
 def handle(app, body: dict | None = None) -> dict:
+    """向导「启动服务」：body.autostart 决定是否注册自启（默认关——用户显式选择）。
+
+    勾选 → 用户级自启（非管理员）/ 系统服务（管理员）；不勾 → 不注册，
+    bridge 由用户手动运行或在工作台开启自启动。
+    """
+    body = body or {}
+    autostart = bool(body.get("autostart", False))
     if os.name == "nt":
-        steps = _service_up_windows() + _win_app_entries()
+        if autostart:
+            steps = _service_up_windows()
+        else:
+            steps = [{"cmd": "说明：未勾选自启动——未注册自动运行。可在工作台「开机自动启动」"
+                             "开启（需 UAC 授权）或手动运行 .venv\\Scripts\\python.exe -m bridge.main",
+                      "ok": True}]
+        steps += _win_app_entries()
     elif sys.platform == "darwin":
         steps = _launchd() + _macos_app_entry()
     else:
@@ -460,7 +473,7 @@ def handle(app, body: dict | None = None) -> dict:
     # 步骤结果落 web.log（无论成败，可追溯）
     failed = [s for s in steps if not s["ok"]]
     if ok:
-        _log_web(f"service_up 完成（{len(steps)} 步全成功）")
+        _log_web(f"service_up 完成（{'勾选自启动' if autostart else '未勾选自启动'}，{len(steps)} 步全成功）")
     else:
         _log_web(f"service_up 部分失败（{len(failed)}/{len(steps)} 步失败）: "
                  f"{failed[0].get('out', '') if failed else ''}")

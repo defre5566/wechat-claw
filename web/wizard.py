@@ -237,6 +237,7 @@ ROUTES = {
     ("POST", "/api/admin/settings"): _h("admin", "settings_set", True),
     ("GET", "/api/admin/autostart"): _h("admin", "autostart_get", True),
     ("POST", "/api/admin/autostart"): _h("admin", "autostart_set", True),
+    ("GET", "/api/admin/status"): _h("admin", "status_get", True),
     ("GET", "/api/admin/logs"): _h("admin", "logs_tail", True),
     ("POST", "/api/admin/logs"): _h("admin", "logs_tail", True),
     ("GET", "/api/admin/modules"): _h("admin", "modules_list", True),
@@ -279,6 +280,16 @@ def _call_route(app, module_name: str, func_name: str, body: dict | None):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def handle(self) -> None:
+        """重写：客户端中途断开（刷新/关闭页面）时静默，不刷 traceback。
+
+        BaseHTTPRequestHandler.handle 在读请求行/写响应时若对端关闭会抛
+        ConnectionAborted/Reset/BrokenPipe——属于良性事件，吞掉即可。
+        """
+        try:
+            super().handle()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError):
+            pass
     protocol_version = "HTTP/1.1"
 
     # ---- 辅助 ----

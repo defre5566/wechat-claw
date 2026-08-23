@@ -188,10 +188,36 @@ def _sync_schedule_from_settings(name: str) -> None:
     _save_module_json(name, data)
 
 
+def _refresh_integrity_baseline(name: str) -> None:
+    """系统改写 module.json 后刷新完整性基准（installed.json 的 sha256）。
+
+    运行时改写（调度联动/设置保存）会改变 module.json 字节，若不刷新基准，
+    完整性校验（调度前快检/每日全量）会把系统合法变更误判为本地篡改。
+    仅源安装模块有基准（installed.json 含 sha256+files）；本地手写模块跳过。
+    """
+    try:
+        from bridge.module_source import _module_sha256, MODULES_DIR as _MS_MODULES
+        st = get_module_state(name)
+        sha = st.get("sha256")
+        files = st.get("files")
+        if not sha or not files:
+            return
+        actual = _module_sha256(_MS_MODULES / name, files)
+        if actual != sha:
+            st["sha256"] = actual
+            save_module_state(name, sha256=actual, files=files)
+    except Exception:
+        pass  # 刷新失败不影响主流程（下次安装/更新会重建基准）
+
+
 def _save_module_json(name: str, data: dict) -> bool:
     try:
         mj = MODULES_DIR / name / "module.json"
-        mj.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        # newline="\n"：Windows 上 write_text 默认把 \n 转 \r\n，会改变文件字节——
+        # 完整性基准（sha256）与作者（LF）不一致，显式保持 LF
+        mj.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                      encoding="utf-8", newline="\n")
+        _refresh_integrity_baseline(name)
         return True
     except OSError:
         return False

@@ -148,3 +148,49 @@ def test_save_state_without_baseline(iso_env):
     assert "sha256" not in st and "files" not in st
     ok, why = ms.verify_module_integrity("Planner")
     assert ok and why == "no-baseline"
+
+
+# ---------- 安装流程闭环（register 联动改写 module.json 后基准一致） ----------
+
+def test_install_then_verify(iso_env):
+    """安装→register 改写 module.json（删 retry）→ 完整性校验基准一致。"""
+    root = iso_env
+    src_root, entry = _mk_src(root.parent, version="0.2.0")
+    # 真实模块带 retry 声明（register 会把它迁到数据区并删除 module.json 中的字段）
+    entry["retry"] = {"max": 2, "interval_seconds": 300}
+    sources = [{"id": "local", "name": "本地", "type": "local",
+                "url": str(src_root), "modules": [entry]}]
+
+    r = ms.install_module(sources, "local", "Planner")
+    assert r["ok"], r
+    mod_dir = root / "modules" / "Planner"
+    assert (mod_dir / "module.json").is_file()
+    # register 联动删除了 retry 字段（内容已变，与 manifest 提交版不同）
+    from modules import register
+    data = json.loads((mod_dir / "module.json").read_text(encoding="utf-8"))
+    assert "retry" not in data
+    # 完整性校验：基准 = 安装目录最终状态 → 通过
+    ok, why = ms.verify_module_integrity("Planner")
+    assert ok, why
+
+
+def test_system_rewrite_refreshes_baseline(iso_env):
+    """系统改写 module.json（调度联动/设置保存）后基准自动刷新，校验仍通过。"""
+    root = iso_env
+    src_root, entry = _mk_src(root.parent, version="0.2.0")
+    sources = [{"id": "local", "name": "本地", "type": "local",
+                "url": str(src_root), "modules": [entry]}]
+    assert ms.install_module(sources, "local", "Planner")["ok"]
+
+    from modules import register
+    mod_dir = root / "modules" / "Planner"
+    data = json.loads((mod_dir / "module.json").read_text(encoding="utf-8"))
+    data["schedule"] = [{"id": "x", "cron": "0 8 * * *"}]  # 模拟调度联动改写
+    assert register._save_module_json("Planner", data)
+    ok, why = ms.verify_module_integrity("Planner")
+    assert ok, why
+
+    # 非系统修改（直接篡改文件）仍被检出
+    (mod_dir / "planner_worker.py").write_text("EVIL", encoding="utf-8")
+    ok, why = ms.verify_module_integrity("Planner")
+    assert not ok and "篡改" in why

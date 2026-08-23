@@ -12,6 +12,8 @@ const state = {
   autostart: false,
   autostartMode: "none",
   autostartPoll: null,
+  serviceStatus: null,
+  statusTimer: null,
   mode: localStorage.getItem("wc-mode") || "light",
   accent: localStorage.getItem("wc-accent") || "amber",
   homeCards: [],
@@ -122,13 +124,17 @@ function home() {
 
 function settings() {
   const enabled = state.modules.filter(x => x.enabled).length;
+  const st = state.serviceStatus || {};
+  const bridgeTxt = st.bridge_running ? "运行中" : "未运行";
+  const bridgeCls = st.bridge_running ? "ok" : "fail";
+  const modeTxt = st.autostart_mode === "system" ? "系统服务·开机自启" : st.autostart_mode === "user" ? "用户级·登录自启" : "未开启自启";
   return `<section class="page secondary-page">${heading("基础设置", "管理服务、外观、自启动和安全选项。")}<div class="settings-rows">
     <div class="settings-row-1">
-      <article class="card panel service-log-final"><div class="panel-head"><div><span class="card-label">SERVICE</span><h2>服务与自启动</h2><p>由 wechat-claw 管理本地服务。</p></div><div class="service-statuses"><span><i class="status-dot"></i>服务运行中</span><span>Web 服务 · 正常</span><span>模块服务 · ${state.modules.length} 个已加载</span></div></div>
-        <div class="service-hero-row"><div class="service-orb">✦</div><div><strong>开机自动启动 bridge</strong><small>登录系统后自动启动微信消息桥接。</small></div>${toggle(state.autostart, "autostart")}</div>
+      <article class="card panel service-log-final"><div class="panel-head"><div><span class="card-label">SERVICE</span><h2>服务与自启动</h2><p>由 wechat-claw 管理本地服务。</p></div><div class="service-statuses"><span class="${bridgeCls}"><i class="status-dot"></i>bridge ${bridgeTxt}</span><span><i class="status-dot"></i>Web 服务 · 正常</span><span><i class="status-dot"></i>模块服务 · ${st.module_count ?? state.modules.length} 个已加载</span></div></div>
+        <div class="service-hero-row"><div class="service-orb">✦</div><div><strong>开机自动启动 bridge</strong><small>${modeTxt}${state.autostartMode === "user" ? " · 开启后升级为开机自启（需 UAC）" : " · 登录系统后自动启动微信消息桥接"}</small></div>${toggle(state.autostart, "autostart")}</div>
         <div class="mini-log-list">
-          <div class="mini-log"><i class="log-line-dot"></i><span><strong>bridge</strong><small>最近一次心跳正常 · 刚刚</small></span></div>
-          <div class="mini-log"><i class="log-line-dot muted"></i><span><strong>系统</strong><small>管理服务运行正常 · 来自运行日志</small></span></div>
+          <div class="mini-log"><i class="log-line-dot ${bridgeCls}"></i><span><strong>bridge</strong><small>${st.bridge_running ? "运行中 · 端口探测正常" : "未运行 · 可在上方开启自启动或手动启动"}</small></span></div>
+          <div class="mini-log"><i class="log-line-dot"></i><span><strong>系统</strong><small>管理服务运行正常 · 来自运行日志</small></span></div>
         </div>
         <button class="btn btn-secondary btn-sm" data-open="logs">查看完整日志</button>
       </article>
@@ -170,12 +176,13 @@ function modules() {
 }
 
 async function loadData() {
-  const [profile, modules, sources, weather, autostart] = await Promise.all([
+  const [profile, modules, sources, weather, autostart, status] = await Promise.all([
     api.get("/api/profile"),
     api.get("/api/admin/modules"),
     api.get("/api/admin/sources"),
     api.get("/api/admin/weather").catch(() => null),
     api.get("/api/admin/autostart").catch(() => null),
+    api.get("/api/admin/status").catch(() => null),
   ]);
   state.profile = profile;
   state.modules = modules.modules || [];
@@ -185,6 +192,9 @@ async function loadData() {
     state.autostartMode = autostart.mode || "none";
     state.autostart = autostart.mode !== "none";
   }
+  if (status?.ok) state.serviceStatus = status;
+  clearTimeout(state.statusTimer);
+  state.statusTimer = setTimeout(async () => { try { const s = await api.get("/api/admin/status"); if (s?.ok) { state.serviceStatus = s; if (state.page === "settings") render(); } } catch (e) { /* 静默 */ } }, 15000);
 }
 
 async function pollAutostart(attempts = 10) {
@@ -232,6 +242,7 @@ function bind() {
   bindThemeControls();
   $$('[data-toggle-key]').forEach(b => b.onclick = () => {
     if (b.dataset.toggleKey === "autostart") { toggleAutostart(b); }
+    else if (b.dataset.toggleKey === "autostart-on") { b.classList.toggle("on"); }
     else {
       const m = state.modules.find(x => `module:${x.name}` === b.dataset.toggleKey); if (!m) return;
       b.disabled = true;
@@ -354,8 +365,26 @@ function openModuleSettings(name) {
   api.post("/api/admin/module/get", { name }).then(d => {
     const module = d.module || {};
     const fields = (module.settings_schema || []).flatMap(g => g.fields || []);
-    const node = modal(`${esc(name)} 设置`, `<p class="modal-note">${esc(module.purpose || "暂无描述")}</p><div class="field-group">${fields.length ? fields.map(f => `<label class="field">${esc(f.label)}<input data-key="${esc(f.key)}" value="${esc(module.settings?.[f.key] ?? f.default ?? "")}"></label>`).join("") : '<p class="modal-note">这个模块没有可配置项。</p>'}<div class="modal-actions"><button class="btn btn-primary btn-sm" data-module-save>保存设置</button></div></div>`);
-    $("[data-module-save]", node).onclick = async () => { const settings = {}; $$("[data-key]", node).forEach(x => settings[x.dataset.key] = x.value); try { await api.post("/api/admin/module/update", { name, settings }); node.remove(); toast("模块设置已保存", "success"); } catch (e) { toast(e.message, "error"); } };
+    const fieldHtml = f => {
+      const val = module.settings?.[f.key] ?? f.default ?? "";
+      if (f.type === "select") {
+        const opts = (f.options || []).map(o => `<option value="${esc(o.value)}" ${String(val) === String(o.value) ? "selected" : ""}>${esc(o.label || o.value)}</option>`).join("");
+        return `<select data-key="${esc(f.key)}" data-type="select">${opts}</select>`;
+      }
+      if (f.type === "boolean") {
+        return `<select data-key="${esc(f.key)}" data-type="boolean"><option value="true" ${val === true || val === "true" ? "selected" : ""}>开启</option><option value="false" ${val === false || val === "" || val === "false" ? "selected" : ""}>关闭</option></select>`;
+      }
+      return `<input data-key="${esc(f.key)}" data-type="string" value="${esc(val)}">`;
+    };
+    const node = modal(`${esc(name)} 设置`, `<p class="modal-note">${esc(module.purpose || "暂无描述")}</p><div class="field-group">${fields.length ? fields.map(f => `<label class="field">${esc(f.label)}${f.desc ? `<small>${esc(f.desc)}</small>` : ""}${fieldHtml(f)}</label>`).join("") : '<p class="modal-note">这个模块没有可配置项。</p>'}<div class="modal-actions"><button class="btn btn-primary btn-sm" data-module-save>保存设置</button></div></div>`);
+    $("[data-module-save]", node).onclick = async () => {
+      const settings = {};
+      $$("[data-key]", node).forEach(x => {
+        const t = x.dataset.type;
+        settings[x.dataset.key] = t === "boolean" ? x.value === "true" : x.value;
+      });
+      try { await api.post("/api/admin/module/update", { name, settings }); node.remove(); toast("模块设置已保存", "success"); } catch (e) { toast(e.message, "error"); }
+    };
   }).catch(e => toast(e.message, "error"));
 }
 function openCardManager() {
@@ -411,11 +440,19 @@ function renderWizard() {
   function ocInstalled(version) {
     ocArea(`<div class="check-row ok"><b>✓</b><span>opencode 已安装</span><small>${esc(version || "")}</small></div>`);
     const btn = $("#ocInstall"); if (btn) { btn.textContent = "✓ 已安装"; btn.disabled = true; }
+    ocHideProgress();
     markDone(1);
   }
   function ocMissing() {
     ocArea(`<div class="check-row fail"><b>!</b><span>未检测到 opencode</span><small>点击「自动安装 opencode」由系统后台安装</small></div>`);
     const btn = $("#ocInstall"); if (btn) { btn.textContent = "自动安装 opencode"; btn.disabled = false; }
+    ocHideProgress();
+  }
+  function ocHideProgress() {
+    // 隐藏"准备安装…/进度条/日志"区，避免与检测结果区状态不一致
+    const st = $("#ocStage"); if (st) st.closest(".check-row").style.display = "none";
+    const wrap = $("#ocBarWrap"); if (wrap) wrap.style.display = "none";
+    const log = $("#ocLog"); if (log) log.style.display = "none";
   }
   function ocDetect(cb) {
     ocArea(`<div class="check-row"><b>…</b><span>正在检测 opencode…</span></div>`);
@@ -451,6 +488,25 @@ function renderWizard() {
     ocDetect(ok => {
       if (!ok && attempts > 0) setTimeout(() => ocDetectWithRetry(attempts - 1), 1000);
     });
+  }
+  /* ---- 启动服务（第六步）：自启动开关 + 服务配置 ---- */
+  async function svcUp() {
+    const area = $("#svcArea");
+    const toggleEl = document.querySelector('[data-toggle-key="autostart-on"]');
+    const on = !!(toggleEl && toggleEl.classList.contains("on"));
+    const next = $("#wizardNext"); if (next) next.disabled = true;
+    if (area) area.innerHTML = `<div class="check-row"><b>…</b><span>正在配置服务…</span></div>`;
+    try {
+      const d = await api.post("/api/service/up", { autostart: on });
+      const rows = (d.steps || []).map(s => `<div class="check-row ${s.ok ? "ok" : "fail"}"><b>${s.ok ? "✓" : "!"}</b><span>${esc(s.cmd)}</span>${s.out ? `<small>${esc(s.out)}</small>` : ""}</div>`).join("");
+      if (area) area.innerHTML = rows || `<div class="check-row ok"><b>✓</b><span>完成</span></div>`;
+      if (d.ok) { toast("服务配置完成", "success"); setTimeout(() => { location.href = "/admin.html"; }, 1200); }
+      else toast("服务配置未完成，可重试", "error");
+    } catch (e) {
+      if (area) area.innerHTML = `<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`;
+    } finally {
+      if (next) next.disabled = false;
+    }
   }
   function ocInstall() {
     const btn = $("#ocInstall"); btn.disabled = true; btn.textContent = "准备安装…";
@@ -510,7 +566,10 @@ function renderWizard() {
       <div class="progress" id="asmBarWrap" style="display:none"><div class="progress-bar" id="asmBar" style="width:0%"></div></div>
       <div class="modal-log" id="asmLog" style="display:none;margin-top:10px"></div>
       <div class="wizard-actions"><button class="btn btn-primary" id="asmAction">开始装配</button></div>` : "";
-    const actionBtn = current === 1 || current === 2 || current === 4 ? "" : `<div class="wizard-actions"><button class="btn btn-primary" id="wizardAction">${["开始体检", "检测 opencode", "开始装配", "生成配置", "获取二维码", "进入工作台"][current]} <span>→</span></button></div>`;
+    const actionBtn = current === 1 || current === 2 || current === 4 || current === 5 ? "" : `<div class="wizard-actions"><button class="btn btn-primary" id="wizardAction">${["开始体检", "检测 opencode", "开始装配", "生成配置", "获取二维码", "进入工作台"][current]} <span>→</span></button></div>`;
+    const svcPanel = current === 5 ? `
+      <div class="check-results" id="svcArea"><div class="check-row"><b>…</b><span>点击「启动服务并进入工作台」开始</span></div></div>
+      <label class="field toggle-field">${toggle(false, "autostart-on")}<span>开机自动启动 bridge</span><small>登录后自动运行微信消息桥接；升级为系统服务时需 UAC 授权（不勾选则本次不注册，可在工作台随时开启）</small></label>` : "";
     const loginPanel = current === 4 ? `
       <div class="login-row">
         <div class="qr-box" id="qrBox">${done.has(4) ? '<div class="qr-done">✅</div>' : "二维码区域"}</div>
@@ -524,15 +583,15 @@ function renderWizard() {
       </div>` : "";
     app.innerHTML = `<main class="wizard-layout"><header class="wizard-top"><div class="brand-lockup"><span>✦</span><div><strong>wechat-claw</strong><small>初始化向导</small></div></div><div class="theme-slot">${themeCard()}</div></header>
       <section class="wizard-progress">${WIZARD_STEPS.map((name, i) => `<button class="wizard-step ${i === current ? "active" : ""} ${done.has(i) ? "done" : ""}" data-step="${i}"><b>${done.has(i) ? "✓" : i + 1}</b><span>${name}</span></button>`).join("")}</section>
-      <section class="wizard-card"><div class="wizard-copy"><span class="card-label">STEP ${String(current + 1).padStart(2, "0")}</span><h1>${WIZARD_TITLES[current]}</h1><p>${WIZARD_DESC[current]}</p></div>${current === 3 ? `<div class="wizard-form"><label class="field">管理密码<input id="wizardPwd" type="password" placeholder="至少 6 位"></label></div>` : ""}${ocPanel}${asmPanel}${loginPanel}${actionBtn}<div id="wizardResult" class="check-results"></div></section>
+      <section class="wizard-card"><div class="wizard-copy"><span class="card-label">STEP ${String(current + 1).padStart(2, "0")}</span><h1>${WIZARD_TITLES[current]}</h1><p>${WIZARD_DESC[current]}</p></div>${current === 3 ? `<div class="wizard-form"><label class="field">管理密码<input id="wizardPwd" type="password" placeholder="至少 6 位"></label></div>` : ""}${ocPanel}${asmPanel}${loginPanel}${svcPanel}${actionBtn}<div id="wizardResult" class="check-results"></div></section>
       <footer class="wizard-footer"><button class="btn btn-secondary" id="wizardPrev" ${current === 0 ? "disabled" : ""}>← 上一步</button><span id="wizardHint"></span><button class="btn btn-primary" id="wizardNext">${current === 5 ? "进入工作台 →" : "下一步 →"}</button></footer></main><div class="toast"></div>`;
     bindThemeControls();
     $$("[data-step]").forEach(b => b.onclick = () => { const i = Number(b.dataset.step); if (i <= current) { current = i; draw(); } });
     $("#wizardPrev").onclick = () => { if (current) { current--; draw(); } };
-    $("#wizardNext").onclick = () => { if (current === 5) { location.href = "/admin.html"; return; } if (done.has(current)) { current++; draw(); } else { $("#wizardHint").textContent = "请先完成当前步骤"; } };
+    $("#wizardNext").onclick = () => { if (current === 5) { svcUp(); return; } if (done.has(current)) { current++; draw(); } else { $("#wizardHint").textContent = "请先完成当前步骤"; } };
     if (current === 1) {
       $("#ocInstall").onclick = ocInstall;
-      $("#ocRedetect").onclick = ocDetect;
+      $("#ocRedetect").onclick = () => ocDetect();
       // 状态优先：安装中 → 轮询（done 后 ocDetect）；已装完 → 直接检测渲染；
       // 从未启动 → 检测。修复"装完必须刷新才显示已装"的竞态
       api.get("/api/opencode/status").then(d => {

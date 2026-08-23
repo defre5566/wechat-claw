@@ -375,10 +375,12 @@ def install_module(sources: list[dict], sid: str, name: str) -> dict:
         from bridge.permissions import refresh_permissions
         refresh_permissions()
         # 安装记录版本（installed.json，部署状态数据区；源模块附完整性基准 sha256+files）
+        # 基准 = 安装目录最终状态（register 联动可能改写 module.json），确保与校验一致
         from modules.register import save_module_state
+        final_sha = _module_sha256(dest, files) if expected else ""
         save_module_state(
             name, version=str(entry.get("version") or ""), source_id=sid,
-            sha256=actual if expected else "", files=files if expected else [],
+            sha256=final_sha, files=files if expected else [],
         )
         return {"ok": True, "name": name, "enabled": False}
     finally:
@@ -471,10 +473,12 @@ def update_module_from_source(sources: list[dict], sid: str, name: str) -> dict:
         # 更新后联动（schedule 重算 + job 重登记 + 豁免 + 索引刷新）
         from modules.register import refresh_module_config, save_module_state
         refresh_module_config(name)
-        # 更新后刷新完整性基准（本地篡改随更新被覆盖为合法新基准）
+        # 更新后刷新完整性基准（本地篡改随更新被覆盖为合法新基准；
+        # 基准 = 更新目录最终状态，联动改写 module.json 后重算）
+        final_sha = _module_sha256(dest, files) if expected else ""
         save_module_state(
             name, version=str(entry.get("version") or ""), source_id=sid,
-            sha256=actual if expected else "", files=files if expected else [],
+            sha256=final_sha, files=files if expected else [],
         )
         for m in src.get("modules", []):
             if m.get("name") == name:
