@@ -92,21 +92,28 @@ def _load_custom_prompts(data_dir: Path) -> str:
 
 
 def _load_encrypted_template(mod_dir: Path) -> str | None:
-    """模块自带加密任务模板（prompts/base.prompt.enc，引擎解密后使用）。
+    """模块任务模板：明文 base.prompt.md 优先（模块源现行规范）。
 
-    通用机制：模板内容属于模块（引擎不解读、不注入任何模块业务数据）；
-    模块作者以加密文件形式提供任务指示（生产者侧 crypto 加密）。
-    解密失败/文件缺失返回 None（render 层拒绝登记，不降级不兜底）。
+    兼容旧：base.prompt.enc（作者加密）存在时尝试解密——跨机密钥不同（部署机
+    crypto.key 随机生成）解密几乎必然失败，失败按缺失处理（不再拒绝登记）。
     """
+    plain = mod_dir / "prompts" / "base.prompt.md"
+    if plain.is_file():
+        try:
+            txt = plain.read_text(encoding="utf-8")
+            return txt.strip() or None
+        except Exception as e:
+            log.warning("[jobs] base.prompt.md 读取失败: %s", e)
+            return None
     enc = mod_dir / "prompts" / "base.prompt.enc"
     if not enc.is_file():
         return None
     try:
         from modules.common.crypto import decrypt
-        plain = decrypt(enc.read_text(encoding="utf-8"))
-        return plain if plain and str(plain).strip() else None
+        text = decrypt(enc.read_text(encoding="utf-8"))
+        return str(text).strip() or None
     except Exception as e:
-        log.warning("[jobs] base.prompt.enc 解密失败（任务将拒绝登记）: %s", e)
+        log.warning("[jobs] base.prompt.enc 解密失败（按缺失处理）: %s", e)
         return None
 
 
