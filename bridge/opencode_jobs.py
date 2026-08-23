@@ -387,18 +387,18 @@ def install_job(module: str, name: str, schedule: str, prompt: str,
     kind = _platform_kind()
     if kind == "windows":
         plans = _schtasks_plans(parsed, schedule)
-        unit_refs = _install_windows_timers(slug, job_path, plans, dry=dry)
+        unit_refs = _install_windows_timers(slug, job_path, plans, job["workdir"], dry=dry)
     elif kind == "darwin":
-        unit_refs = _install_launchd(slug, job_path, parsed, dry=dry)
+        unit_refs = _install_launchd(slug, job_path, parsed, job["workdir"], dry=dry)
     else:
-        unit_refs = _install_systemd(slug, job_path, schedule, dry=dry)
+        unit_refs = _install_systemd(slug, job_path, schedule, job["workdir"], dry=dry)
 
     return {"ok": True, "slug": slug, "job_path": str(job_path), "timers": unit_refs}
 
 
 # ---------- 平台定时器生成 ----------
 
-def _install_systemd(slug: str, job_path: Path, schedule: str, dry: bool) -> list[str]:
+def _install_systemd(slug: str, job_path: Path, schedule: str, workdir: str, dry: bool) -> list[str]:
     """Linux：systemd user timer（OnCalendar 精确触发；supervisor 自写日志，不再依赖 perl/重定向）。"""
     cal = _cron_to_oncalendar(schedule)
     if cal is None:
@@ -414,7 +414,7 @@ def _install_systemd(slug: str, job_path: Path, schedule: str, dry: bool) -> lis
         f"Description=OpenCode Job: {slug}\n"
         "[Service]\n"
         "Type=oneshot\n"
-        f"WorkingDirectory={job_path.parent}\n"
+        f"WorkingDirectory={workdir}\n"
         f"Environment=\"PATH=/usr/local/bin:/usr/bin:/bin\"\n"
         f"ExecStart={' '.join(cmd)}\n"
         f"StandardOutput=append:{log_path}\n"
@@ -447,7 +447,7 @@ def _install_systemd(slug: str, job_path: Path, schedule: str, dry: bool) -> lis
     return [f"opencode-job-{slug}.timer"]
 
 
-def _install_launchd(slug: str, job_path: Path, parsed: dict, dry: bool) -> list[str]:
+def _install_launchd(slug: str, job_path: Path, parsed: dict, workdir: str, dry: bool) -> list[str]:
     """macOS：launchd plist（StartCalendarInterval 精确触发）。"""
     import plistlib
     launch_agents = Path.home() / "Library" / "LaunchAgents"
@@ -457,7 +457,7 @@ def _install_launchd(slug: str, job_path: Path, parsed: dict, dry: bool) -> list
     payload = {
         "Label": f"com.wechat-claw.job.{slug}",
         "ProgramArguments": cmd,
-        "WorkingDirectory": str(job_path.parent),
+        "WorkingDirectory": workdir,
         "StartCalendarInterval": _launchd_interval(parsed),
         "ProcessType": "Background",
     }
@@ -476,15 +476,13 @@ def _install_launchd(slug: str, job_path: Path, parsed: dict, dry: bool) -> list
     return [plist.name]
 
 
-def _install_windows_timers(slug: str, job_path: Path, plans: list[dict], dry: bool) -> list[str]:
+def _install_windows_timers(slug: str, job_path: Path, plans: list[dict], workdir: str, dry: bool) -> list[str]:
     """Windows：schtasks 计划任务（列表 cron 拆多任务；/f 幂等覆盖）。
 
     工作目录：schtasks 无 /workdir 参数（Task Scheduler 默认 CWD=System32，python -m 找不到
     bridge 包）——用 cmd /c "cd /d <工作目录> && ..." 包装，与 systemd WorkingDirectory 对齐。
     """
     cmd = _supervisor_cmd(job_path)
-    workdir = job_path.parent
-    # 外层 /tr 用双引号包整条，内部引号转义：cmd /c "cd /d <wd> && "python" -m ... <job.json>"
     inner = " && ".join([f'cd /d "{workdir}"', " ".join(f'"{c}"' if (" " in c or c.endswith(".exe")) else c for c in cmd)])
     tr = f"cmd /c \"{inner}\""
     tasks: list[str] = []
