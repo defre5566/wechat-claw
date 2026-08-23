@@ -63,7 +63,9 @@ python3 -m venv .venv
 环境装配（opencode 安装 / 配置生成 / 扫码登录 / 拉起服务）。
 
 - Linux/macOS：`./wechat-claw`；Windows：`wechat-claw.exe`
-- 用户数据（`.config/`）落在**可执行文件所在目录**，备份 = 打包该目录
+- 用户数据（`.config/`）落在**平台规范数据根**：Windows `%LOCALAPPDATA%\wechat-claw`、
+  Linux `~/.local/share/wechat-claw`、macOS `~/Library/Application Support/wechat-claw`
+  （`WC_DATA_ROOT` 环境变量可覆盖）；备份 = 打包该目录
 - opencode 不捆绑：向导引导安装官方版本
 - 构建：`.venv/bin/python scripts/build.py`（PyInstaller，不能交叉编译，各平台各自构建）
 

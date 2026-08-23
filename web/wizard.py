@@ -449,19 +449,40 @@ class Handler(BaseHTTPRequestHandler):
         self._json(status, data)
 
 
-def _maybe_autostart_opencode(app: WizardApp) -> None:
-    """web 打开前即后台自动安装 opencode（未安装时；selftest 跳过）。"""
+def _maybe_autostart_opencode(app: WizardApp) -> bool:
+    """web 打开前即后台自动安装 opencode（未安装时；selftest 跳过）。
+
+    返回 True = 本次开始安装（调用方应等待安装完成后再开浏览器）。
+    """
     from web.handlers import opencode_setup
     if opencode_setup.SELFTEST:
-        return
+        return False
     if opencode_setup.detect_installed():
-        return
+        return False
     if app.job_running():
-        return
+        return False
     cmds = opencode_setup.build_install_commands()
     if cmds:
         app.start_job("opencode_install", cmds, on_done=lambda ok: opencode_setup.install_done(app, ok))
         _log("[wizard] opencode 未安装，已在后台启动自动安装（web 界面可看进度）")
+        return True
+    return False
+
+
+def _wait_opencode_installed(timeout: float = 600.0) -> None:
+    """等待 opencode 安装完成（页面打开前就绪，避免误报"未检测到"）。
+
+    轮询 detect_installed（每 2s）；超时兜底继续（不阻塞 web 启动）。
+    """
+    import time
+    from web.handlers import opencode_setup
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if opencode_setup.detect_installed():
+            _log("[wizard] opencode 安装完成")
+            return
+        time.sleep(2)
+    _log(f"[wizard] 等待 opencode 安装超时（{int(timeout)}s），继续启动")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -490,11 +511,14 @@ def main(argv: list[str] | None = None) -> int:
     url = f"http://{HOST}:{port}/"
     _log(f"[wizard] 服务已启动: {url}")
     if not SELFTEST:
+        # 未装 opencode → 后台自动安装并等待完成后再开浏览器（避免页面误报未检测到）；
+        # 已安装 → 跳过等待直接开浏览器
+        if _maybe_autostart_opencode(APP):
+            _wait_opencode_installed()
         try:
             webbrowser.open(url)
         except Exception:  # noqa: BLE001
             _log(f"[wizard] 请手动打开浏览器访问 {url}")
-        _maybe_autostart_opencode(APP)
         # Windows 入口解耦注册（幂等）：开始菜单快捷方式 + VBS 启动器（8650 探测 → 开浏览器）
         try:
             from web.handlers.service_up import ensure_win_shortcuts
