@@ -1,13 +1,9 @@
 """② opencode 检测与自动安装（长任务 Job，进度可监控）。
 
 - 检测：PATH 中 opencode → ~/.opencode/bin/opencode（官方默认安装目录，Windows 同名 .exe）
-- 安装（web 打开前由 wizard 启动时自动触发，也可在向导内手动点）：
-  - Linux/macOS：官方安装脚本 `curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path`
-    （脚本处理 arch/musl/AVX2 baseline，非交互、无需 sudo、失败退出码非 0；
-    --no-modify-path 不污染 shell 配置，由 config_gen 写 acp.command 绝对路径）
-  - Windows：官方 install.ps1 已下线（404），改为直接下载官方 release zip 解压到
-    %USERPROFILE%\\.opencode\\bin\\（不依赖 bash/包管理器；只下载官方二进制，不执行远程脚本）
-- 安装成功 → 重新检测 → app.steps["opencode"] = True（前端门禁放行）
+- 安装（仅打包形态 exe）：
+  - 从 exe 包内 vendor/opencode/opencode.exe 复制到 ~/.opencode/bin/，零网络依赖
+- 源码形态：用户手动放置 opencode 到 ~/.opencode/bin/，检测后自动识别
 """
 from __future__ import annotations
 
@@ -22,28 +18,6 @@ SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 # 官方默认安装目录（install 脚本 INSTALL_DIR；Windows 同名）
 _INSTALL_DIR = os.path.expanduser("~/.opencode/bin")
 _DOC_URL = "https://opencode.ai/docs/install"
-
-# GitHub release 镜像代理（opencode 下载，按优先级轮询，全部失败才报错）
-_MIRRORS = [
-    "https://ghproxy.com/https://github.com",
-    "https://github.moeyy.xyz/https://github.com",
-    "https://mirror.ghproxy.com/https://github.com",
-]
-# raw.githubusercontent.com 镜像（POSIX 安装脚本用，与 _MIRRORS 独立）
-_RAW_MIRRORS = [
-    "https://ghproxy.com/https://raw.githubusercontent.com",
-    "https://github.moeyy.xyz/https://raw.githubusercontent.com",
-    "https://mirror.ghproxy.com/https://raw.githubusercontent.com",
-]
-
-# 已知风险（如实声明）：curl|bash 无 checksum 校验（官方脚本动态逻辑无法固定摘要），
-# 信任 https://opencode.ai/install 脚本本身；对供应链敏感者可手动安装后点「重新检测」
-_POSIX_CMD = "( " + " || ".join(
-    "curl -fsSL --retry 3 '" + m + "/anomalyco/opencode/main/scripts/install.sh'"
-    for m in _RAW_MIRRORS
-) + " ) | bash -s -- --no-modify-path"
-# Windows：官方 release zip（x64），下载解压即可，无管道执行远程脚本
-_WIN_ZIP_URL = _MIRRORS[0] + "/anomalyco/opencode/releases/latest/download/opencode-windows-x64.zip"
 
 # 向导安装标记：存在 = opencode 由 wechat-claw 安装（XDG 数据收敛到数据根、卸载时一并删除）
 from bridge.config import DATA_ROOT  # noqa: E402
@@ -83,36 +57,21 @@ def detect_installed() -> dict | None:
 
 
 def build_install_commands() -> list[dict]:
-    """分平台安装命令（作为长任务 Job 依次执行，带阶段标注）。"""
+    """分平台安装命令（仅打包形态 exe 有效：从包内复制 opencode 到安装目录）。"""
     if os.name == "nt":
-        # PowerShell：多镜像轮询下载 → 解压到安装目录 → 归一化 opencode.exe → 清理
-        install_dir = _INSTALL_DIR.replace("'", "''")
-        # 构建镜像 URL 列表（每个镜像 + opencode zip 路径）
-        urls = "', '".join(
-            m + "/anomalyco/opencode/releases/latest/download/opencode-windows-x64.zip"
-            for m in _MIRRORS
-        )
-        ps = (
-            "$ErrorActionPreference='Stop';"
-            f"$dir='{install_dir}';"
-            "New-Item -ItemType Directory -Force -Path $dir | Out-Null;"
-            "$tmp=Join-Path $env:TEMP 'opencode-windows-x64.zip';"
-            "$urls=@('" + urls + "');"
-            "$downloaded=$false;"
-            "foreach ($u in $urls) { try { Write-Host '尝试下载: '$u;"
-            "Invoke-WebRequest -Uri $u -OutFile $tmp -ErrorAction Stop;"
-            "$downloaded=$true; break } catch { Write-Host '下载失败: '$u } };"
-            "if (-not $downloaded) { throw '所有下载源均失败' };"
-            "Expand-Archive -Force -Path $tmp -DestinationPath $dir;"
-            "$exe=Get-ChildItem -Path $dir -Recurse -File | Where-Object { $_.Name -like 'opencode*' } | "
-            "Select-Object -First 1;"
-            "if ($exe) { Copy-Item -Force $exe.FullName (Join-Path $dir 'opencode.exe') };"
-            "Remove-Item -Force $tmp"
-        )
-        return [{"stage": "下载并安装 opencode（官方 release zip，多镜像轮询）",
-                 "cmd": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]}]
-    return [{"stage": "下载并安装 opencode（官方脚本，多镜像轮询）",
-             "cmd": ["bash", "-c", f"set -o pipefail; {_POSIX_CMD}"]}]
+        # 打包形态：从 exe 解包目录 RESOURCE_ROOT 复制 opencode.exe
+        from bridge.config import RESOURCE_ROOT
+        bundled = RESOURCE_ROOT / "vendor" / "opencode" / "opencode.exe"
+        if bundled.is_file():
+            install_dir = _INSTALL_DIR.replace("'", "''")
+            ps = (
+                "$ErrorActionPreference='Stop';"
+                f"$dir='{install_dir}';"
+                "New-Item -ItemType Directory -Force -Path $dir | Out-Null;"
+                f"Copy-Item -Force '{bundled}' -Destination (Join-Path $dir 'opencode.exe');"
+            )
+            return [{"stage": "安装捆绑的 opencode", "cmd": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]}]
+    return []
 
 
 def install_done(app, ok: bool) -> None:
@@ -147,9 +106,9 @@ def detect(app, body: dict | None = None) -> dict:
     return {
         "ok": False,
         "missing": True,
-        "cmd": _POSIX_CMD if os.name != "nt" else _WIN_ZIP_URL,
+        "cmd": "",
         "doc": _DOC_URL,
-        "hint": "未检测到 opencode，可点「自动安装」或复制下方命令手动安装",
+        "hint": "未检测到 opencode，请手动下载 opencode-windows-x64.zip 解压后放置到 " + _INSTALL_DIR,
     }
 
 
@@ -164,7 +123,10 @@ def install(app, body: dict | None = None) -> dict:
         return {"ok": True, "already": True, "version": d["version"]}
     if app.job_running():
         return {"ok": False, "error": "已有任务运行中"}, 409
-    app.start_job("opencode_install", build_install_commands(), on_done=lambda ok: install_done(app, ok))
+    cmds = build_install_commands()
+    if not cmds:
+        return {"ok": False, "error": "未找到捆绑的 opencode（源码形态需手动安装）"}, 400
+    app.start_job("opencode_install", cmds, on_done=lambda ok: install_done(app, ok))
     return {"ok": True, "started": True}
 
 

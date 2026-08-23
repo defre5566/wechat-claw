@@ -37,9 +37,11 @@ def ensure_pyinstaller() -> None:
 def main() -> int:
     if "--check" in sys.argv:
         ensure_pyinstaller()
+        _check_opencode()
         print("[build] 环境就绪")
         return 0
     ensure_pyinstaller()
+    _check_opencode()
     # vendor SDK 需在环境内（PyInstaller 收集依赖）
     cmd = [str(VENV_PY), "-m", "PyInstaller", "--noconfirm", "--clean", str(SPEC)]
     print("[build]", " ".join(cmd))
@@ -52,6 +54,16 @@ def main() -> int:
     for f in sorted(out.iterdir()):
         print(f"  - {f.name} ({f.stat().st_size / 1024 / 1024:.1f} MB)")
     return 0
+
+
+def _check_opencode() -> None:
+    """检查 opencode 捆绑文件（vendor/opencode/opencode.exe）。存在则打包进 exe，不存在则跳过。"""
+    oc = ROOT / "vendor" / "opencode" / "opencode.exe"
+    if oc.is_file():
+        print(f"[build] opencode 已捆绑（{oc.stat().st_size / 1024 / 1024:.1f} MB），将打包进 exe")
+    else:
+        print("[build] 警告：vendor/opencode/opencode.exe 不存在，opencode 未捆绑")
+        print("[build] 如需捆绑，请手动下载 opencode-windows-x64.zip 解压后放至该位置")
 
 
 if __name__ == "__main__":

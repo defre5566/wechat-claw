@@ -48,8 +48,11 @@ devlog/
 # 旧版前端备份（保留本地，不上传）
 web/bak/
 
-# 本机生成配置（部署产物，不入库）
-opencode.jsonc
+# opencode 二进制（构建时手动放入，不跟踪）
+vendor/opencode/
 
 # 审阅报告（本地产物，不入库）
 ura-*.md
+
+# opencode 二进制（构建时手动放入，不跟踪）
+vendor/opencode/

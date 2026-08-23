@@ -40,6 +40,10 @@ datas = [
 if sys.platform == "win32":
     # Windows 服务化依赖 nssm（service_up 从 RESOURCE_ROOT 读取）
     datas.append((str(_ROOT / "vendor" / "nssm"), "vendor/nssm"))
+    # opencode 捆绑（构建时手动放入 vendor/opencode/opencode.exe）
+    oc = _ROOT / "vendor" / "opencode" / "opencode.exe"
+    if oc.is_file():
+        datas.append((str(oc), "vendor/opencode/opencode.exe"))
 
 a = Analysis(
     [str(_ROOT / "web" / "wizard.py")],
