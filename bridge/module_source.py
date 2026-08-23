@@ -241,7 +241,8 @@ def _expand_files(mod_dir: Path, files: list) -> list[str]:
             for sub in sorted(p.rglob("*")):
                 if not sub.is_file():
                     continue
-                rel = str(sub.relative_to(mod_dir))
+                # 分隔符归一化：Windows 上 str(Path) 为反斜杠，哈希须与作者（Linux 正斜杠）一致
+                rel = str(sub.relative_to(mod_dir)).replace("\\", "/")
                 if "__pycache__" in rel or rel.endswith(".pyc"):
                     continue
                 out.append(rel)
