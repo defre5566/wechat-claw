@@ -295,6 +295,13 @@ class Handler(BaseHTTPRequestHandler):
     def _file(self, path: Path, content_type: str) -> None:
         self._file_bytes(path.read_bytes(), content_type)
 
+    def _redirect(self, location: str) -> None:
+        """302 跳转（入口智能指向用）。"""
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def _file_bytes(self, data: bytes, content_type: str) -> None:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
@@ -354,7 +361,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?")[0]
         if path == "/":
-            self._serve_static("wizard.html")
+            # 入口智能指向：已部署（.config/config.yaml 存在）→ 工作台；未初始化 → 向导
+            if (DATA_ROOT / ".config" / "config.yaml").is_file():
+                self._redirect("/admin.html")
+            else:
+                self._serve_static("wizard.html")
             return
         if path == "/api/state":
             self._json(200, _state())
