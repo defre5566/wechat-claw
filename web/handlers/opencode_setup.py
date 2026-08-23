@@ -50,13 +50,18 @@ def detect_installed() -> dict | None:
         if os.path.isfile(p) and p not in cands:
             cands.append(p)
     for p in cands:
-        try:
-            r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=15)
-        except Exception:
-            continue
-        if r.returncode == 0:
-            out = (r.stdout or r.stderr or "").strip().splitlines()
-            return {"version": out[0] if out else "已安装", "path": p}
+        # 刚解压/杀软扫描期 --version 可能瞬时失败：重试一次再判不存在
+        for attempt in (1, 2):
+            try:
+                r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=15)
+            except Exception:
+                r = None
+            if r is not None and r.returncode == 0:
+                out = (r.stdout or r.stderr or "").strip().splitlines()
+                return {"version": out[0] if out else "已安装", "path": p}
+            if attempt == 1:
+                import time
+                time.sleep(0.3)
     return None
 
 

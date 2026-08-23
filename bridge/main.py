@@ -351,8 +351,11 @@ class BridgeCore:
         log.info("[weixin] 已连接 iLink")
 
         gate = PermissionGate(self.send_text)
+        # ACP 命令解析（与 job 登记同源）：acp.command → PATH → ~/.opencode/bin 绝对路径。
+        # 服务化（nssm/systemd）环境下 PATH 不含用户目录，裸 "opencode" 会找不到——兜底绝对路径
+        from bridge.config import resolve_opencode
         self._agent = ConfirmAcpAgent(
-            command=get_cfg("acp.command"),
+            command=resolve_opencode() or get_cfg("acp.command"),
             args=["acp", "--port", str(get_cfg("acp.port"))],  # 固定端口，避免与 PWA web(4096) 冲突
             cwd=str(WORKDIR),
             auto_approve=False,  # 由微信确认接管

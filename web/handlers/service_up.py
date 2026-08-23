@@ -381,8 +381,9 @@ def _win_app_entries() -> list[dict]:
     ) % (WEB_PORT, start_cmd, WEB_PORT)
     steps += _write_file(vbs, vbs_content)
 
-    # 3) 开始菜单快捷方式（wscript → vbs）
+    # 3) 开始菜单快捷方式（wscript → vbs）——目标目录须先创建（否则 Save 抛 DirectoryNotFound）
     lnk_cmd = (
+        f"$dir='{start_menu}'; if (!(Test-Path $dir)) {{ New-Item -ItemType Directory -Force -Path $dir | Out-Null }}; "
         f"$ws=New-Object -ComObject WScript.Shell; "
         f"$s=$ws.CreateShortcut('{lnk}'); "
         f"$s.TargetPath='wscript.exe'; "
@@ -601,7 +602,9 @@ def autostart_set(on: bool) -> dict:
                 steps += _uac_elevate(False)
                 uac_required = True
     ok = all(s["ok"] for s in steps)
+    failed = [s for s in steps if not s["ok"]]
     _log_web(f"autostart_set({'开启' if on else '关闭'}): {'成功' if ok else '失败'}"
-             f"（{'需 UAC' if uac_required else '已提权/免提权'}）")
+             f"（{'需 UAC' if uac_required else '已提权/免提权'}）"
+             + (f"；失败步骤: {failed[0].get('cmd')} -> {failed[0].get('out', '')}" if failed else ""))
     return {"ok": ok, "steps": steps, "mode": autostart_status().get("mode", "none"),
             "uac_required": uac_required}

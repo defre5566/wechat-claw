@@ -417,13 +417,13 @@ function renderWizard() {
     ocArea(`<div class="check-row fail"><b>!</b><span>未检测到 opencode</span><small>点击「自动安装 opencode」由系统后台安装</small></div>`);
     const btn = $("#ocInstall"); if (btn) { btn.textContent = "自动安装 opencode"; btn.disabled = false; }
   }
-  function ocDetect() {
+  function ocDetect(cb) {
     ocArea(`<div class="check-row"><b>…</b><span>正在检测 opencode…</span></div>`);
     ocPost("/api/opencode/detect").then(d => {
-      if (d.already) ocInstalled(d.version);
-      else if (d.missing) ocMissing();
-      else ocArea(`<div class="check-row fail"><b>!</b><span>${esc(d.error || "检测失败")}</span></div>`);
-    }).catch(e => ocArea(`<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`));
+      if (d.already) { ocInstalled(d.version); cb && cb(true); }
+      else if (d.missing) { ocMissing(); cb && cb(false); }
+      else { ocArea(`<div class="check-row fail"><b>!</b><span>${esc(d.error || "检测失败")}</span></div>`); cb && cb(false); }
+    }).catch(e => { ocArea(`<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`); cb && cb(false); });
   }
   function ocPollStart() {
     const btn = $("#ocInstall"); if (btn) { btn.disabled = true; btn.textContent = "安装中…"; }
@@ -440,11 +440,17 @@ function renderWizard() {
         if (d.done) {
           clearInterval(ocPollTimer);
           const b2 = $("#ocBar"); if (b2) b2.style.width = "100%";
-          if (d.ok) ocDetect();
+          if (d.ok) ocDetectWithRetry(2);
           else { const b = $("#ocInstall"); if (b) { b.textContent = "自动安装 opencode"; b.disabled = false; } ocArea(`<div class="check-row fail"><b>!</b><span>安装失败，可重试</span></div>`); }
         }
       }).catch(() => {});
     }, 1500);
+  }
+  // 安装完成后的检测带自动重试（Windows 刚解压/杀软扫描期 --version 瞬时失败）
+  function ocDetectWithRetry(attempts) {
+    ocDetect(ok => {
+      if (!ok && attempts > 0) setTimeout(() => ocDetectWithRetry(attempts - 1), 1000);
+    });
   }
   function ocInstall() {
     const btn = $("#ocInstall"); btn.disabled = true; btn.textContent = "准备安装…";
@@ -458,7 +464,7 @@ function renderWizard() {
   let loginPollTimer = null;
   function loginStart() {
     const banner = $("#loginBanner"); const box = $("#qrBox");
-    clearInterval(loginPollTimer);
+    clearInterval(loginPollTimer); loginPollTimer = null;
     if (banner) { banner.className = "login-banner waiting"; banner.textContent = "⏳ 获取二维码…"; }
     api.post("/api/login/setup").then(d => {
       if (d.already) {
@@ -565,6 +571,8 @@ function renderWizard() {
     }
     if (current === 4) {
       $("#qrRefresh").onclick = loginStart;
+      // 自动获取二维码（未登录且未在轮询时）；已登录（done）则保持已登录态不重置
+      if (!done.has(4) && !loginPollTimer) loginStart();
     }
     const action = $("#wizardAction");
     if (action) action.onclick = async () => {

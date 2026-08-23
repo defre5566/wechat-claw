@@ -301,7 +301,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError):
+            pass  # 客户端提前断开（刷新/关闭页面）：良性，静默不刷 traceback
 
     def log_message(self, *args) -> None:  # 静默 access log
         return
