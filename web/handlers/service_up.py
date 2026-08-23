@@ -251,13 +251,14 @@ def _user_autostart_unreg() -> list[dict]:
 
 
 def _service_up_windows() -> list[dict]:
-    """Windows 拉起 bridge：管理员 → nssm 系统服务；非管理员 → 用户级自启 + UAC 引导说明。"""
+    """Windows 拉起 bridge：管理员 → nssm 系统服务（start 即启动）；非管理员 →
+    用户级自启（HKCU Run）+ 本次运行启动（spawn）——无论哪种，bridge 都立即运行。"""
     if _is_admin():
         steps = _nssm()
-        steps.append({"cmd": "说明：系统服务 wechat-bridge 已注册（开机自启、免登录）", "ok": True})
+        steps.append({"cmd": "说明：系统服务 wechat-bridge 已注册并启动（开机自启、免登录）", "ok": True})
     else:
-        steps = _user_autostart_reg()
-        steps.append({"cmd": "说明：当前为普通权限，已注册用户级自启（登录后自动运行）。"
+        steps = _user_autostart_reg() + _spawn_bridge_now()
+        steps.append({"cmd": "说明：当前为普通权限，已注册用户级自启（登录后自动运行）并已启动本次实例。"
                              "如需开机免登录的系统服务，请到管理后台开启『开机自动启动』"
                              "——届时会弹出 UAC 授权窗口，请点『允许』", "ok": True})
     return steps
@@ -447,21 +448,43 @@ echo 微信登录凭证（如需彻底清除）：%USERPROFILE%\\.wechat-agent-s
     return steps
 
 
+def _spawn_bridge_now() -> list[dict]:
+    """本次运行启动 bridge（独立进程，不注册自启）：Windows 无窗口，POSIX 新会话。
+
+    bridge 写 logs/system.log，脱离 web 进程独立运行；与自启注册互不影响。
+    """
+    if SELFTEST:
+        return [{"cmd": "（selftest）将后台启动 bridge（本次运行）", "ok": True, "dry": True}]
+    py = sys.executable if getattr(sys, "frozen", False) \
+        else str(DEPLOY_ROOT / ".venv" / "Scripts" / "python.exe")
+    kwargs: dict = {"cwd": str(DEPLOY_ROOT)}
+    if os.name == "nt":
+        kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW：无控制台窗口
+        kwargs["close_fds"] = True
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        subprocess.Popen([py, "-m", "bridge.main"], **kwargs)
+        return [{"cmd": "已后台启动 bridge（本次运行，日志见 logs/system.log）", "ok": True}]
+    except Exception as e:  # noqa: BLE001
+        return [{"cmd": f"bridge 后台启动失败: {e}", "ok": False}]
+
+
 def handle(app, body: dict | None = None) -> dict:
     """向导「启动服务」：body.autostart 决定是否注册自启（默认关——用户显式选择）。
 
-    勾选 → 用户级自启（非管理员）/ 系统服务（管理员）；不勾 → 不注册，
-    bridge 由用户手动运行或在工作台开启自启动。
+    勾选 → 用户级自启（非管理员）/ 系统服务（管理员）；不勾 → 仅本次运行启动 bridge。
+    无论勾选与否，配置完成后 bridge 都会启动（logs/system.log 见启动日志）。
     """
     body = body or {}
     autostart = bool(body.get("autostart", False))
     if os.name == "nt":
         if autostart:
-            steps = _service_up_windows()
+            steps = _service_up_windows()  # 内部已含启动（nssm start / spawn）
         else:
-            steps = [{"cmd": "说明：未勾选自启动——未注册自动运行。可在工作台「开机自动启动」"
-                             "开启（需 UAC 授权）或手动运行 .venv\\Scripts\\python.exe -m bridge.main",
-                      "ok": True}]
+            steps = [{"cmd": "说明：未勾选自启动——仅本次运行启动 bridge；"
+                             "如需开机自启，可在工作台「开机自动启动」开启（需 UAC 授权）",
+                      "ok": True}] + _spawn_bridge_now()
         steps += _win_app_entries()
     elif sys.platform == "darwin":
         steps = _launchd() + _macos_app_entry()
@@ -473,7 +496,7 @@ def handle(app, body: dict | None = None) -> dict:
     # 步骤结果落 web.log（无论成败，可追溯）
     failed = [s for s in steps if not s["ok"]]
     if ok:
-        _log_web(f"service_up 完成（{'勾选自启动' if autostart else '未勾选自启动'}，{len(steps)} 步全成功）")
+        _log_web(f"service_up 完成（{'勾选自启动' if autostart else '仅本次运行'}，{len(steps)} 步全成功）")
     else:
         _log_web(f"service_up 部分失败（{len(failed)}/{len(steps)} 步失败）: "
                  f"{failed[0].get('out', '') if failed else ''}")

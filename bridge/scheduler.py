@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import get as get_cfg
-from bridge.config import MODULES_ROOT
+from bridge.config import MODULES_ROOT, PROJECT_ROOT
 from modules.registry_index import build_index
 
 from .state import SCHED_STATE_FILE, load_sched_state, prune_state_file, save_sched_state
@@ -177,9 +177,15 @@ async def run_module(name: str, args: list[str] | None = None) -> int:
         log.error(f"[sched] 模块脚本不存在: {script}")
         return 2
     cmd = [sys.executable, str(script)] + (args or [])
+    # 注入 PYTHONPATH：worker 脚本 sys.path 只有脚本目录+modules/（todo_worker 注入 parent.parent），
+    # `from bridge.config import` 在项目根——不加项目根则部署形态下 No module named 'bridge'。
+    import os
+    env = os.environ.copy()
+    roots = [str(PROJECT_ROOT), str(MODULES_DIR)]
+    env["PYTHONPATH"] = os.pathsep.join(roots + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
         )
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout=RUN_TIMEOUT)

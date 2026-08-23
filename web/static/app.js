@@ -242,7 +242,7 @@ function bind() {
   bindThemeControls();
   $$('[data-toggle-key]').forEach(b => b.onclick = () => {
     if (b.dataset.toggleKey === "autostart") { toggleAutostart(b); }
-    else if (b.dataset.toggleKey === "autostart-on") { b.classList.toggle("on"); }
+    else if (b.dataset.toggleKey === "autostart-on") { b.classList.toggle("on"); svcUp(); }
     else {
       const m = state.modules.find(x => `module:${x.name}` === b.dataset.toggleKey); if (!m) return;
       b.disabled = true;
@@ -364,24 +364,50 @@ function openModal(name) {
 function openModuleSettings(name) {
   api.post("/api/admin/module/get", { name }).then(d => {
     const module = d.module || {};
-    const fields = (module.settings_schema || []).flatMap(g => g.fields || []);
     const fieldHtml = f => {
       const val = module.settings?.[f.key] ?? f.default ?? "";
+      let input;
       if (f.type === "select") {
         const opts = (f.options || []).map(o => `<option value="${esc(o.value)}" ${String(val) === String(o.value) ? "selected" : ""}>${esc(o.label || o.value)}</option>`).join("");
-        return `<select data-key="${esc(f.key)}" data-type="select">${opts}</select>`;
+        input = `<select data-key="${esc(f.key)}" data-type="select">${opts}</select>`;
+      } else if (f.type === "boolean") {
+        input = `<select data-key="${esc(f.key)}" data-type="boolean"><option value="true" ${val === true || val === "true" ? "selected" : ""}>开启</option><option value="false" ${val === false || val === "" || val === "false" ? "selected" : ""}>关闭</option></select>`;
+      } else if (f.type === "tags") {
+        input = `<textarea data-key="${esc(f.key)}" data-type="tags" rows="4">${esc(Array.isArray(val) ? val.join("\n") : String(val))}</textarea>`;
+      } else { // string / path 等文本输入
+        input = `<input data-key="${esc(f.key)}" data-type="string" value="${esc(val)}">`;
       }
-      if (f.type === "boolean") {
-        return `<select data-key="${esc(f.key)}" data-type="boolean"><option value="true" ${val === true || val === "true" ? "selected" : ""}>开启</option><option value="false" ${val === false || val === "" || val === "false" ? "selected" : ""}>关闭</option></select>`;
-      }
-      return `<input data-key="${esc(f.key)}" data-type="string" value="${esc(val)}">`;
+      const cond = f.show_when ? JSON.stringify(f.show_when) : "";
+      return `<label class="field" data-show-when='${esc(cond)}'>${esc(f.label)}${f.desc ? `<small>${esc(f.desc)}</small>` : ""}${input}</label>`;
     };
-    const node = modal(`${esc(name)} 设置`, `<p class="modal-note">${esc(module.purpose || "暂无描述")}</p><div class="field-group">${fields.length ? fields.map(f => `<label class="field">${esc(f.label)}${f.desc ? `<small>${esc(f.desc)}</small>` : ""}${fieldHtml(f)}</label>`).join("") : '<p class="modal-note">这个模块没有可配置项。</p>'}<div class="modal-actions"><button class="btn btn-primary btn-sm" data-module-save>保存设置</button></div></div>`);
+    const groups = (module.settings_schema || []);
+    const body = groups.length ? groups.map(g =>
+      `<div class="setting-group"><h3>${esc(g.section || "")}</h3>${g.desc ? `<p class="modal-note">${esc(g.desc)}</p>` : ""}${(g.fields || []).map(fieldHtml).join("")}</div>`).join("")
+      : '<p class="modal-note">这个模块没有可配置项。</p>';
+    const node = modal(`${esc(name)} 设置`, `<p class="modal-note">${esc(module.purpose || "暂无描述")}</p>${body}<div class="modal-actions"><button class="btn btn-primary btn-sm" data-module-save>保存设置</button></div>`);
+    // show_when 条件显示：字段值变化联动显隐（不满足条件的字段不提交，后端也会丢弃）
+    const applyShowWhen = () => {
+      $$("[data-show-when]", node).forEach(el => {
+        const cond = el.dataset.showWhen ? JSON.parse(el.dataset.showWhen) : null;
+        if (!cond || Object.keys(cond).length === 0) { el.style.display = ""; return; }
+        const ok = Object.entries(cond).every(([k, v]) => {
+          const src = node.querySelector(`[data-key="${k}"]`);
+          return src && String(src.value) === String(v);
+        });
+        el.style.display = ok ? "" : "none";
+      });
+    };
+    $$("[data-type='select']", node).forEach(s => s.addEventListener("change", applyShowWhen));
+    applyShowWhen();
     $("[data-module-save]", node).onclick = async () => {
       const settings = {};
       $$("[data-key]", node).forEach(x => {
+        const holder = x.closest("[data-show-when]");
+        if (holder && holder.style.display === "none") return;  // 隐藏字段不提交
         const t = x.dataset.type;
-        settings[x.dataset.key] = t === "boolean" ? x.value === "true" : x.value;
+        if (t === "boolean") settings[x.dataset.key] = x.value === "true";
+        else if (t === "tags") settings[x.dataset.key] = x.value.split("\n").map(s => s.trim()).filter(Boolean);
+        else settings[x.dataset.key] = x.value;
       });
       try { await api.post("/api/admin/module/update", { name, settings }); node.remove(); toast("模块设置已保存", "success"); } catch (e) { toast(e.message, "error"); }
     };
@@ -477,16 +503,19 @@ function renderWizard() {
         if (d.done) {
           clearInterval(ocPollTimer);
           const b2 = $("#ocBar"); if (b2) b2.style.width = "100%";
-          if (d.ok) ocDetectWithRetry(2);
+          if (d.ok) ocDetectWithRetry(5);
           else { const b = $("#ocInstall"); if (b) { b.textContent = "自动安装 opencode"; b.disabled = false; } ocArea(`<div class="check-row fail"><b>!</b><span>安装失败，可重试</span></div>`); }
         }
       }).catch(() => {});
     }, 1500);
   }
-  // 安装完成后的检测带自动重试（Windows 刚解压/杀软扫描期 --version 瞬时失败）
+  // 安装完成后的确认带自动重试（Windows 刚解压/Defender 扫描期 --version 瞬时失败，
+  // 重试窗口 ~7.5s）；确认期间显示"正在确认安装结果"，不误导为"未检测到"
   function ocDetectWithRetry(attempts) {
+    ocArea(`<div class="check-row"><b>…</b><span>正在确认 opencode 安装结果…</span></div>`);
     ocDetect(ok => {
-      if (!ok && attempts > 0) setTimeout(() => ocDetectWithRetry(attempts - 1), 1000);
+      if (!ok && attempts > 0) setTimeout(() => ocDetectWithRetry(attempts - 1), 1500);
+      else if (!ok) ocMissing();
     });
   }
   /* ---- 启动服务（第六步）：自启动开关 + 服务配置 ---- */
@@ -632,6 +661,10 @@ function renderWizard() {
       $("#qrRefresh").onclick = loginStart;
       // 自动获取二维码（未登录且未在轮询时）；已登录（done）则保持已登录态不重置
       if (!done.has(4) && !loginPollTimer) loginStart();
+    }
+    if (current === 5) {
+      // 进入第 6 步即自动启动 bridge（默认不勾选 = 仅本次运行）；开关点击立即生效
+      svcUp();
     }
     const action = $("#wizardAction");
     if (action) action.onclick = async () => {
