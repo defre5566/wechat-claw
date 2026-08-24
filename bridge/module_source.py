@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from bridge.config import MODULES_ROOT
@@ -129,7 +130,6 @@ def _fetch_url(url: str, timeout: int = 30, budget: int = 120) -> bytes:
 def _extract_zip_top(zip_data: bytes, dest: Path) -> bool:
     """解压 ZIP 并把顶层目录（repo-root）内容落位到 dest；失败返回 False。"""
     import io
-    import tempfile
     import zipfile
     if zip_data[:2] != b"PK":  # 假 200（HTML 错误页）快速拒收
         return False

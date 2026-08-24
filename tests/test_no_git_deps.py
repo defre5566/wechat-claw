@@ -144,3 +144,75 @@ def test_gitpull_no_git(monkeypatch):
     monkeypatch.setattr(_sh, "which", lambda _: None)
     r = admin.gitpull_get(None)
     assert r["ok"] is False and "未安装 git" in r["error"]
+
+
+# ---------- 完整路径回归（抓顶层 import 漏删/NameError 类问题） ----------
+
+def _fake_repo(dest: Path) -> None:
+    """落一个含 manifest.json 的假仓库目录（模拟 _git_clone 拉取结果）。"""
+    import json as _json
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "manifest.json").write_text(_json.dumps({
+        "modules": [{"name": "todo", "version": "1.0", "purpose": "p", "sha256": ""}]
+    }), encoding="utf-8")
+
+
+def test_fetch_source_full_path(monkeypatch, tmp_path):
+    """fetch_source 完整路径（源刷新）：mkdtemp/清理/manifest 读取全真走。
+
+    回归 1f125aa 引入的顶层 tempfile 误删 NameError（mock _fetch_url 的单测
+    覆盖不到 fetch_source 内部的 mkdtemp 调用）。
+    """
+    monkeypatch.setattr(ms, "_git_clone",
+                        lambda url, dest: (_fake_repo(dest), True)[1])
+    src = {"id": "official", "name": "官方模块库", "type": "github",
+           "url": "https://github.com/foo/bar.git", "builtin": False}
+    res = ms.fetch_source(src)
+    assert res["ok"] is True
+    assert res["modules"][0]["name"] == "todo"
+    assert len(res["fingerprint"]) == 64  # sha256 hex
+
+
+def test_fetch_source_clone_fail(monkeypatch, tmp_path):
+    """clone 失败：返回 ok=False + 明确错误，不抛异常。"""
+    monkeypatch.setattr(ms, "_git_clone", lambda url, dest: False)
+    res = ms.fetch_source({"id": "x", "type": "github", "url": "https://github.com/foo/bar.git"})
+    assert res["ok"] is False and "clone 失败" in res["error"]
+
+
+def test_update_module_full_path(monkeypatch, tmp_path):
+    """update_module_from_source 完整路径（更新）：mkdtemp/备份/复制全真走。"""
+    import json as _json
+    # 已装模块（含 module.json + worker + token）
+    installed = tmp_path / "modules" / "todo"
+    installed.mkdir(parents=True)
+    (installed / "module.json").write_text(_json.dumps({"name": "todo"}), encoding="utf-8")
+    (installed / "todo_worker.py").write_text("pass", encoding="utf-8")
+    (installed / "token").write_text("secret", encoding="utf-8")
+    monkeypatch.setattr(ms, "MODULES_DIR", tmp_path / "modules")
+
+    # 源侧新包（worker 内容更新）
+    def fake_clone(url, dest):
+        mod = Path(dest) / "todo"
+        mod.mkdir(parents=True)
+        (mod / "module.json").write_text(_json.dumps({"name": "todo"}), encoding="utf-8")
+        (mod / "todo_worker.py").write_text("# new version", encoding="utf-8")
+        (Path(dest) / "manifest.json").write_text(_json.dumps({
+            "modules": [{"name": "todo", "version": "2.0", "purpose": "", "sha256": "",
+                         "files": ["module.json", "todo_worker.py"]}]
+        }), encoding="utf-8")
+        return True
+
+    monkeypatch.setattr(ms, "_git_clone", fake_clone)
+    # register 联动隔离（本测试只验证 module_source 层）
+    monkeypatch.setattr("modules.register.refresh_module_config", lambda name: None)
+    monkeypatch.setattr("modules.register.save_module_state", lambda *a, **kw: None)
+
+    sources = [{"id": "official", "name": "官方模块库", "type": "github",
+                "url": "https://github.com/foo/bar.git",
+                "modules": [{"name": "todo", "version": "2.0", "purpose": "", "sha256": "",
+                             "files": ["module.json", "todo_worker.py"]}]}]
+    r = ms.update_module_from_source(sources, "official", "todo")
+    assert r.get("ok") is True and r.get("updated") is True
+    assert (installed / "todo_worker.py").read_text(encoding="utf-8") == "# new version"
+    assert (installed / "token").read_text(encoding="utf-8") == "secret"  # token 不轮换
