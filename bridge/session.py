@@ -152,7 +152,16 @@ class ConfirmAcpAgent(AcpAgent):
         self._ctx = spawn_agent_process(
             client, self._command, *self._args, env=spawn_env, cwd=self._cwd,
         )
-        self._conn, self._process = await self._ctx.__aenter__()
+        try:
+            self._conn, self._process = await self._ctx.__aenter__()
+        except FileNotFoundError as e:
+            # 自启/nssm 等场景 PATH 受限：带实际 command 值落地诊断，WinError 2 不再裸抛
+            log.error(
+                "[acp] 拉起 opencode 失败（找不到可执行文件）: command=%r args=%r (%s)。"
+                "请确认 opencode 在 PATH / <数据根>/bin / ~/.opencode/bin 之一，"
+                "或到 web 向导重新安装", self._command, self._args, e,
+            )
+            raise
 
         await self._conn.initialize(
             protocol_version=PROTOCOL_VERSION,

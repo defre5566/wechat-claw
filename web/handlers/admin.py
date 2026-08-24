@@ -756,6 +756,14 @@ def status_get(app, body: dict | None = None) -> dict:
 
 def start_bridge(app, body: dict | None = None) -> dict:
     """手动启动 bridge（基础设置页「启动」按钮调用）。"""
+    # 预检 opencode：缺失时直接报原因，不产生必败子进程（spawn 报 WinError 2 信息量为零）
+    from bridge.config import resolve_opencode
+    from bridge.main import OPENCODE_LOOKUP_HINT
+    if not resolve_opencode():
+        return {"ok": False, "steps": [{
+            "cmd": f"opencode 未找到（已查 {OPENCODE_LOOKUP_HINT}），请到初始化向导第二步安装",
+            "ok": False,
+        }]}
     from web.handlers.service_up import _spawn_bridge_now
     steps = _spawn_bridge_now()
     ok = all(s.get("ok") for s in steps)

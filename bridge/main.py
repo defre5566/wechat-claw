@@ -61,6 +61,27 @@ def _setup_file_logging() -> None:
 # 待发队列上限（网络故障期防内存无界；满则丢弃新条目并告警）
 RETRY_QUEUE_LIMIT = 1000
 
+# opencode 查找位置说明（resolve 失败时报错用，admin.start_bridge 复用）
+OPENCODE_LOOKUP_HINT = "PATH → <数据根>/bin → ~/.opencode/bin"
+
+
+def resolve_acp_command() -> str:
+    """解析 opencode 可执行文件（fail-fast）：找不到直接退出，不裸名盲试 spawn。
+
+    旧实现回退裸 "opencode"：服务化（nssm/systemd）PATH 不含用户目录时
+    spawn 抛 WinError 2 / FileNotFoundError，信息量为零。现改为启动即明确报错。
+    """
+    from .config import resolve_opencode
+    cmd = resolve_opencode()
+    if cmd:
+        return cmd
+    log.critical(
+        "[acp] opencode 未找到（已查 %s）。请到 web 初始化向导第二步安装 opencode，"
+        "或在 config.yaml 的 acp.command 配置绝对路径后重启 bridge",
+        OPENCODE_LOOKUP_HINT,
+    )
+    raise SystemExit(1)  # 非零退出，nssm/systemd 可感知
+
 
 def spawn_task(coro, name: str):
     """创建后台任务并挂监护：异常死亡 → 明确日志（防静默消失），返回 task。"""
@@ -352,11 +373,8 @@ class BridgeCore:
         log.info("[weixin] 已连接 iLink")
 
         gate = PermissionGate(self.send_text)
-        # ACP 命令解析（与 job 登记同源）：acp.command → PATH → ~/.opencode/bin 绝对路径。
-        # 服务化（nssm/systemd）环境下 PATH 不含用户目录，裸 "opencode" 会找不到——兜底绝对路径
-        from bridge.config import resolve_opencode
         self._agent = ConfirmAcpAgent(
-            command=resolve_opencode() or get_cfg("acp.command"),
+            command=resolve_acp_command(),
             args=["acp", "--port", str(get_cfg("acp.port"))],  # 固定端口，避免与 PWA web(4096) 冲突
             cwd=str(WORKDIR),
             auto_approve=False,  # 由微信确认接管
