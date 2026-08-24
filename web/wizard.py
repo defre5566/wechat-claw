@@ -455,21 +455,19 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _maybe_autostart_opencode(app: WizardApp) -> bool:
-    """web 打开前即后台自动安装 opencode（未安装时；selftest 跳过）。
+    """web 打开前同步安装 opencode（零竞态、零窗口）。
 
-    返回 True = 本次开始安装（调用方应等待安装完成后再开浏览器）。
+    用 shutil.copy2 在当前进程内复制，不走子进程。安装完成才开 web。
     """
     from web.handlers import opencode_setup
     if opencode_setup.SELFTEST:
         return False
     if opencode_setup.detect_installed():
         return False
-    if app.job_running():
-        return False
-    cmds = opencode_setup.build_install_commands()
-    if cmds:
-        app.start_job("opencode_install", cmds, on_done=lambda ok: opencode_setup.install_done(app, ok))
-        _log("[wizard] opencode 未安装，已在后台启动自动安装（web 界面可看进度）")
+    ok = opencode_setup.install_bundled_sync()
+    if ok:
+        app.steps["opencode"] = True
+        _log("[wizard] opencode 已同步安装（捆绑包内复制）")
         return True
     _log("[wizard] opencode 自动安装跳过：未找到捆绑的 opencode 文件")
     return False
@@ -557,6 +555,10 @@ def main(argv: list[str] | None = None) -> int:
     _maybe_seed_data_root()
     if _relaunch_from_data_root(argv):
         return 0
+    # 打包形态 opencode 安装（自动/手动安装按钮的子进程入口）
+    if len(argv) >= 2 and argv[0] == "-m" and argv[1] == "bridge.opencode_install":
+        from web.handlers.opencode_setup import install_bundled_sync
+        return 0 if install_bundled_sync() else 1
     # 打包形态 bridge 模式：`wechat-claw -m bridge.main`（service_up / nssm 启动命令）
     if len(argv) >= 2 and argv[0] == "-m" and argv[1] == "bridge.main":
         from bridge import main as bridge_main

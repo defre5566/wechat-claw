@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
@@ -56,20 +57,42 @@ def detect_installed() -> dict | None:
     return None
 
 
+def _find_bundled() -> Path | None:
+    """查找捆绑的 opencode 文件：RESOURCE_ROOT 优先，DATA_ROOT 兜底。"""
+    from bridge.config import RESOURCE_ROOT, DATA_ROOT
+    from pathlib import Path
+    bundled = RESOURCE_ROOT / "vendor" / "opencode" / "opencode.exe"
+    if not bundled.is_file():
+        bundled = DATA_ROOT / "vendor" / "opencode" / "opencode.exe"
+    return bundled if bundled.is_file() else None
+
+
+def install_bundled_sync() -> bool:
+    """同步安装捆绑的 opencode（零子进程、零转义、零竞态）。"""
+    bundled = _find_bundled()
+    if bundled is None:
+        return False
+    install_dir = os.path.expanduser("~/.opencode/bin")
+    os.makedirs(install_dir, exist_ok=True)
+    shutil.copy2(str(bundled), os.path.join(install_dir, "opencode.exe"))
+    _INSTALL_MARKER.parent.mkdir(parents=True, exist_ok=True)
+    d = detect_installed()
+    _INSTALL_MARKER.write_text(
+        json.dumps({
+            "version": d["version"] if d else "",
+            "installed_at": datetime.now().isoformat(timespec="seconds"),
+            "method": "autostart",
+        }, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return True
+
+
 def build_install_commands() -> list[dict]:
     """分平台安装命令（仅打包形态 exe 有效：从包内复制 opencode 到安装目录）。"""
-    if os.name == "nt":
-        from bridge.config import RESOURCE_ROOT, DATA_ROOT
-        bundled = RESOURCE_ROOT / "vendor" / "opencode" / "opencode.exe"
-        if not bundled.is_file():
-            bundled = DATA_ROOT / "vendor" / "opencode" / "opencode.exe"
-        if bundled.is_file():
-            install_dir = _INSTALL_DIR
-            cmd = (
-                f'if not exist "{install_dir}" mkdir "{install_dir}" & '
-                f'copy /Y "{bundled}" "{install_dir}\\opencode.exe"'
-            )
-            return [{"stage": "安装捆绑的 opencode", "cmd": ["cmd", "/c", cmd]}]
+    if os.name == "nt" and _find_bundled() is not None:
+        return [{"stage": "安装捆绑的 opencode",
+                 "cmd": [sys.executable, "-m", "bridge.opencode_install"]}]
     return []
 
 
