@@ -142,11 +142,10 @@ def _frozen_program() -> str:
     wechat-claw.exe 在该目录下。nssm/定时器/快捷方式都应指向此 exe。
     """
     if getattr(sys, "frozen", False):
-        meipass = getattr(sys, "_MEIPASS", "")
-        if meipass:
-            cand = Path(meipass).parent / "wechat-claw.exe"
-            if cand.is_file():
-                return str(cand)
+        from bridge.config import DATA_ROOT
+        installed = DATA_ROOT / "wechat-claw.exe"
+        if installed.is_file():
+            return str(installed)
         return sys.executable
     return str(DEPLOY_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
 

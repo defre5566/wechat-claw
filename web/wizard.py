@@ -474,7 +474,8 @@ def _maybe_autostart_opencode(app: WizardApp) -> bool:
 def _maybe_seed_data_root() -> None:
     """首启种子化（仅 frozen 形态）：复制平台代码到 DATA_ROOT，版本判断避免重复覆盖。
 
-    复制的目录：bridge/、modules/（基础库 register.py/common/ 等）、patches/、web/。
+    复制的目录：bridge/、modules/（基础库 register.py/common/ 等）、patches/、web/、vendor/。
+    同时复制 exe 自身到 DATA_ROOT（给 nssm/自启/定时器提供稳定路径）。
     不碰的用户数据：.config/、agent-SDK/、logs/、modules/modules_data/、modules/todo/ 等。
     """
     if not getattr(sys, "frozen", False):
@@ -490,7 +491,7 @@ def _maybe_seed_data_root() -> None:
     if local_ver and local_ver > VERSION:
         _log(f"[wizard] 本地版本 {local_ver} 高于 exe 版本 {VERSION}，跳过复制")
         return
-    for dirname in ("bridge", "modules", "patches", "web"):
+    for dirname in ("bridge", "modules", "patches", "web", "vendor"):
         src = _RES_ROOT / dirname
         if not src.is_dir():
             continue
@@ -507,6 +508,17 @@ def _maybe_seed_data_root() -> None:
                     pass
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(f, dst)
+    # 复制 exe 自身到 DATA_ROOT（nssm/自启/定时器用稳定路径，不依赖临时解包目录）
+    exe_src = sys.executable
+    exe_dst = _DATA_ROOT / "wechat-claw.exe"
+    try:
+        if exe_dst.is_file() and exe_dst.read_bytes() == exe_src.read_bytes():
+            pass  # 一致跳过
+        else:
+            exe_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(exe_src, exe_dst)
+    except OSError:
+        pass
     # 写入版本号
     try:
         ver_file.write_text(VERSION, encoding="utf-8")
