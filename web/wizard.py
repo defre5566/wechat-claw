@@ -471,6 +471,7 @@ def _maybe_autostart_opencode(app: WizardApp) -> bool:
         app.start_job("opencode_install", cmds, on_done=lambda ok: opencode_setup.install_done(app, ok))
         _log("[wizard] opencode 未安装，已在后台启动自动安装（web 界面可看进度）")
         return True
+    _log("[wizard] opencode 自动安装跳过：未找到捆绑的 opencode 文件")
     return False
 def _maybe_seed_data_root() -> None:
     """首启种子化（仅 frozen 形态）：复制平台代码到 DATA_ROOT，版本判断避免重复覆盖。

@@ -59,18 +59,17 @@ def detect_installed() -> dict | None:
 def build_install_commands() -> list[dict]:
     """分平台安装命令（仅打包形态 exe 有效：从包内复制 opencode 到安装目录）。"""
     if os.name == "nt":
-        # 打包形态：从 exe 解包目录 RESOURCE_ROOT 复制 opencode.exe
-        from bridge.config import RESOURCE_ROOT
+        from bridge.config import RESOURCE_ROOT, DATA_ROOT
         bundled = RESOURCE_ROOT / "vendor" / "opencode" / "opencode.exe"
+        if not bundled.is_file():
+            bundled = DATA_ROOT / "vendor" / "opencode" / "opencode.exe"
         if bundled.is_file():
-            install_dir = _INSTALL_DIR.replace("'", "''")
-            ps = (
-                "$ErrorActionPreference='Stop';"
-                f"$dir='{install_dir}';"
-                "New-Item -ItemType Directory -Force -Path $dir | Out-Null;"
-                f"Copy-Item -Force '{bundled}' -Destination (Join-Path $dir 'opencode.exe');"
+            install_dir = _INSTALL_DIR
+            cmd = (
+                f'if not exist "{install_dir}" mkdir "{install_dir}" & '
+                f'copy /Y "{bundled}" "{install_dir}\\opencode.exe"'
             )
-            return [{"stage": "安装捆绑的 opencode", "cmd": ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]}]
+            return [{"stage": "安装捆绑的 opencode", "cmd": ["cmd", "/c", cmd]}]
     return []
 
 
