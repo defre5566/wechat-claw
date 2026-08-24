@@ -31,7 +31,7 @@ def _walk(src: str, dst: str) -> list[tuple[str, str]]:
             continue
         rel = f.relative_to(src_p)
         # 统一正斜杠（PyInstaller 内部用 POSIX 路径，Windows 反斜杠可能触发转义问题）
-        out.append((str(f), str(Path(dst) / rel).replace("\\", "/")))
+        out.append((str(f), str(Path(dst) / rel.parent).replace("\\", "/")))
     return out
 
 
@@ -66,7 +66,7 @@ if sys.platform == "win32":
     datas.append((str(_ROOT / "vendor" / "nssm"), "vendor/nssm"))
     oc = _ROOT / "vendor" / "opencode" / "opencode.exe"
     if oc.is_file():
-        datas.append((str(oc), "vendor/opencode/opencode.exe"))
+        datas.append((str(oc), "vendor/opencode"))
 
 a = Analysis(
     [str(_ROOT / "web" / "wizard.py")],
