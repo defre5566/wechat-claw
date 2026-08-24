@@ -89,10 +89,13 @@ def install_bundled_sync() -> bool:
 
 
 def build_install_commands() -> list[dict]:
-    """分平台安装命令（仅打包形态 exe 有效：从包内复制 opencode 到安装目录）。"""
+    """分平台安装命令。"""
     if os.name == "nt" and _find_bundled() is not None:
         return [{"stage": "安装捆绑的 opencode",
                  "cmd": [sys.executable, "-m", "bridge.opencode_install"]}]
+    if sys.platform != "win32":
+        return [{"stage": "下载 opencode",
+                 "cmd": ["sh", "-c", "curl -fsSL https://opencode.ai/install.sh | sh"]}]
     return []
 
 

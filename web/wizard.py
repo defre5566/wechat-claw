@@ -12,12 +12,10 @@ import importlib
 import json
 import os
 import shlex
-import shutil
 import subprocess
 import sys
 import threading
 import time
-import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -195,9 +193,7 @@ class WizardApp:
         job = self.jobs.get(name)
         return job.snapshot() if job else None
 
-    def _opencode_done(self, ok: bool) -> None:
-        if ok:
-            self.steps["opencode"] = True
+    
 
 
 APP = WizardApp()
@@ -454,151 +450,16 @@ class Handler(BaseHTTPRequestHandler):
         self._json(status, data)
 
 
-def _maybe_autostart_opencode(app: WizardApp) -> bool:
-    """web 打开前同步安装 opencode（零竞态、零窗口）。
-
-    用 shutil.copy2 在当前进程内复制，不走子进程。安装完成才开 web。
-    """
-    from web.handlers import opencode_setup
-    if opencode_setup.SELFTEST:
-        return False
-    if opencode_setup.detect_installed():
-        return False
-    ok = opencode_setup.install_bundled_sync()
-    if ok:
-        app.steps["opencode"] = True
-        _log("[wizard] opencode 已同步安装（捆绑包内复制）")
-        return True
-    _log("[wizard] opencode 自动安装跳过：未找到捆绑的 opencode 文件")
-    return False
-def _maybe_seed_data_root() -> None:
-    """首启种子化（仅 frozen 形态）：复制平台代码到 DATA_ROOT，版本判断避免重复覆盖。
-
-    复制的目录：bridge/、modules/（基础库 register.py/common/ 等）、patches/、web/、vendor/。
-    同时复制 exe 自身到 DATA_ROOT（给 nssm/自启/定时器提供稳定路径）。
-    不碰的用户数据：.config/、agent-SDK/、logs/、modules/modules_data/、modules/todo/ 等。
-    """
-    if not getattr(sys, "frozen", False):
-        return
-    import hashlib
-    from bridge.config import VERSION
-    from bridge.config import DATA_ROOT as _DATA_ROOT
-    from bridge.config import RESOURCE_ROOT as _RES_ROOT
-    ver_file = _DATA_ROOT / ".version"
-    local_ver = ver_file.read_text().strip() if ver_file.is_file() else ""
-    if local_ver == VERSION:
-        return  # 版本一致，跳过
-    if local_ver and local_ver > VERSION:
-        _log(f"[wizard] 本地版本 {local_ver} 高于 exe 版本 {VERSION}，跳过复制")
-        return
-    for dirname in ("bridge", "modules", "patches", "web", "vendor"):
-        src = _RES_ROOT / dirname
-        if not src.is_dir():
-            continue
-        for f in src.rglob("*"):
-            if "__pycache__" in f.parts or f.suffix == ".pyc" or not f.is_file():
-                continue
-            rel = f.relative_to(src)
-            dst = _DATA_ROOT / dirname / rel
-            if dst.is_file():
-                try:
-                    if hashlib.sha256(dst.read_bytes()).hexdigest() == hashlib.sha256(f.read_bytes()).hexdigest():
-                        continue
-                except OSError:
-                    pass
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(f, dst)
-    # 复制 exe 自身到 DATA_ROOT（nssm/自启/定时器用稳定路径，不依赖临时解包目录）
-    exe_src = sys.executable
-    exe_dst = _DATA_ROOT / "wechat-claw.exe"
-    try:
-        if exe_dst.is_file() and exe_dst.read_bytes() == exe_src.read_bytes():
-            pass  # 一致跳过
-        else:
-            exe_dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(exe_src, exe_dst)
-    except OSError:
-        pass
-    # 写入版本号
-    try:
-        ver_file.write_text(VERSION, encoding="utf-8")
-        _log(f"[wizard] 首启种子化完成（版本 {VERSION}）")
-    except OSError:
-        pass
-
-
-def _relaunch_from_data_root(argv: list[str]) -> bool:
-    """如果当前 exe 不在 DATA_ROOT 中，移交到 DATA_ROOT 副本后退出。
-
-    种子化完成后，原始 exe（Downloads 等）释放文件锁，用户可以删除安装包。
-    """
-    if not getattr(sys, "frozen", False):
-        return False
-    installed = DATA_ROOT / "wechat-claw.exe"
-    if not installed.is_file():
-        return False
-    current = Path(sys.executable).resolve()
-    if current == installed.resolve():
-        return False
-    _log(f"[wizard] 移交到 DATA_ROOT 副本: {installed}")
-    subprocess.Popen(
-        [str(installed)] + argv,
-        creationflags=no_window_flags(),
-    )
-    return True
-
-
 def main(argv: list[str] | None = None) -> int:
+    """启动 HTTP 服务。"""
     argv = argv or sys.argv[1:]
-    # 首启种子化（仅 frozen 形态）：把平台代码从 RESOURCE_ROOT 复制到 DATA_ROOT，
-    # 版本判断避免重复覆盖；不碰用户数据（.config/agent-SDK/modules_data/用户安装的模块）
-    _maybe_seed_data_root()
-    if _relaunch_from_data_root(argv):
-        return 0
-    # 打包形态 opencode 安装（自动/手动安装按钮的子进程入口）
-    if len(argv) >= 2 and argv[0] == "-m" and argv[1] == "bridge.opencode_install":
-        from web.handlers.opencode_setup import install_bundled_sync
-        return 0 if install_bundled_sync() else 1
-    # 打包形态 bridge 模式：`wechat-claw -m bridge.main`（service_up / nssm 启动命令）
-    if len(argv) >= 2 and argv[0] == "-m" and argv[1] == "bridge.main":
-        from bridge import main as bridge_main
-
-        try:
-            import asyncio
-            asyncio.run(bridge_main.main())
-        except KeyboardInterrupt:
-            pass
-        except SystemExit:
-            raise  # 未登录等语义：非零退出码透传（服务管理器可见）
-        except Exception as e:  # noqa: BLE001
-            _log(f"[wizard] bridge 启动失败: {e}")
-            return 1
-        return 0
-    # 打包形态 job 执行器：`wechat-claw -m bridge.opencode_jobs supervisor <job.json>`
-    # （平台定时器到点触发；源码形态由 venv python 直接调用同命令）
-    if len(argv) >= 2 and argv[0] == "-m" and argv[1] == "bridge.opencode_jobs":
-        from bridge import opencode_jobs
-        return opencode_jobs.main(argv[2:])
     port = PORT
     for i, a in enumerate(argv):
         if a == "--port" and i + 1 < len(argv):
             port = int(argv[i + 1])
 
     httpd = ThreadingHTTPServer((HOST, port), Handler)
-    url = f"http://{HOST}:{port}/"
-    _log(f"[wizard] 服务已启动: {url}")
-    if not SELFTEST:
-        _maybe_autostart_opencode(APP)
-        try:
-            webbrowser.open(url)
-        except Exception:  # noqa: BLE001
-            _log(f"[wizard] 请手动打开浏览器访问 {url}")
-        # Windows 入口解耦注册（幂等）：开始菜单快捷方式 + VBS 启动器（8650 探测 → 开浏览器）
-        try:
-            from web.handlers.service_up import ensure_win_shortcuts
-            ensure_win_shortcuts()
-        except Exception:  # noqa: BLE001  注册失败不阻塞 web 启动
-            pass
+    _log(f"[wizard] 服务已启动: http://{HOST}:{port}/")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

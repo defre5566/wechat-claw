@@ -5,7 +5,7 @@
     pyinstaller --noconfirm wechat-claw.spec
 
 打包内容：
-- 入口 web/wizard.py（可执行文件直接启动 web 服务）
+- 入口 entry.py（种子化 + 移交 + 启动 web 服务）
 - 数据文件：web/static（含 cities.json）、web/templates、config.yaml.example、
   AGENTS.md、opencode.jsonc.example、vendor/nssm（Windows）、vendor/opencode
 - 全量收集：bridge/ + modules/ + patches/（datas 强制打包，排除 __pycache__）
@@ -69,7 +69,7 @@ if sys.platform == "win32":
         datas.append((str(oc), "vendor/opencode"))
 
 a = Analysis(
-    [str(_ROOT / "web" / "wizard.py")],
+    [str(_ROOT / "entry.py")],
     pathex=[str(_ROOT), str(_ROOT / "vendor")],
     binaries=[],
     datas=datas,
