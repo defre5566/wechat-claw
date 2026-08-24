@@ -361,7 +361,6 @@ def _win_app_entries() -> list[dict]:
     if not appdata:
         return [{"cmd": "LOCALAPPDATA 未定义，无法注册卸载项", "ok": False}]
     base = Path(appdata) / "wechat-claw"                     # 数据根
-    uninstall_bat = Path(appdata) / "wechat-claw-uninstall.bat"
     vbs = base / "wechat-claw-web.vbs"
     start_menu = (Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows"
                   / "Start Menu" / "Programs" / "wechat-claw")
@@ -409,7 +408,7 @@ def _win_app_entries() -> list[dict]:
     steps += _exec_commands([["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
                               "-Command", lnk_cmd]])
 
-    # 4) HKCU 卸载注册项 + 数据根内卸载脚本（收敛：脚本与数据同目录，自删式清理）
+# 4) HKCU 卸载注册项 + 数据根内卸载脚本（收敛：脚本与数据同目录，自删式清理）
     # 注意：不用 f-string 三引号——bat 里的 ""%~f0"" 会产生 """ 序列提前结束字符串
     uninstall_bat = base / "uninstall.bat"
     uninstall_content = (
@@ -417,6 +416,9 @@ def _win_app_entries() -> list[dict]:
 chcp 65001 >nul
 rem wechat-claw 卸载脚本（初始化向导生成）
 setlocal
+echo [准备] 正在终止运行中的进程...
+taskkill /f /im wechat-claw.exe >nul 2>&1
+taskkill /f /fi "IMAGENAME eq wscript.exe" >nul 2>&1
 set NSSM=%~dp0nssm.exe
 "%NSSM%" stop wechat-bridge >nul 2>&1
 "%NSSM%" remove wechat-bridge confirm >nul 2>&1
@@ -439,7 +441,8 @@ echo 程序本体请手动删除：__DEPLOY_ROOT__
 echo 微信登录凭证（如需彻底清除）：%USERPROFILE%\\.wechat-agent-sdk\\accounts.json
 """
         # bat 里的 ""%~dp0"" 转义会形成 """ 序列，不能用三引号字符串承载 → 单引号行拼接
-        'start "" /b cmd /c "timeout /t 2 /nobreak >nul & rmdir /s /q ""%~dp0"" & del ""%~f0"""\n'
+        # for /l 重试 5 次（每次间隔 2 秒），应对进程退出后文件锁释放延迟
+        'start "" /b cmd /c "@for /l %%i in (1,1,5) do @(rmdir /s /q ""%~dp0"" >nul 2>&1 & if not exist ""%~dp0"" exit 0 & timeout /t 2 /nobreak >nul)"\n'
         "exit /b 0\n"
     ).replace("__DEPLOY_ROOT__", str(DEPLOY_ROOT))
     steps += _write_file(uninstall_bat, uninstall_content)
@@ -452,6 +455,12 @@ echo 微信登录凭证（如需彻底清除）：%USERPROFILE%\\.wechat-agent-s
         ["reg", "add", key, "/v", "InstallLocation", "/t", "REG_SZ", "/d", str(DEPLOY_ROOT), "/f"],
         ["reg", "add", key, "/v", "UninstallString", "/t", "REG_SZ",
          "/d", f'"{uninstall_bat}"', "/f"],
+        ["reg", "add", key, "/v", "QuietUninstallString", "/t", "REG_SZ",
+         "/d", f'"{uninstall_bat}" /silent', "/f"],
+        ["reg", "add", key, "/v", "URLInfoAbout", "/t", "REG_SZ",
+         "/d", "https://github.com/defre5566/wechat-claw", "/f"],
+        ["reg", "add", key, "/v", "HelpLink", "/t", "REG_SZ",
+         "/d", "https://github.com/defre5566/wechat-claw/issues", "/f"],
         ["reg", "add", key, "/v", "NoModify", "/t", "REG_DWORD", "/d", "1", "/f"],
         ["reg", "add", key, "/v", "NoRepair", "/t", "REG_DWORD", "/d", "1", "/f"],
     ]
