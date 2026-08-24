@@ -110,6 +110,9 @@ if len(sys.argv) > 1 and sys.argv[1] == "-m" and len(sys.argv) > 2:
     if sys.argv[2] == "bridge.opencode_jobs":
         from bridge import opencode_jobs
         sys.exit(opencode_jobs.main(sys.argv[3:]))
+    if sys.argv[2] == "bridge.opencode_install":
+        from web.handlers.opencode_setup import install_bundled_sync
+        sys.exit(0 if install_bundled_sync() else 1)
 
 
 def main() -> int:

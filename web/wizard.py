@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -385,8 +386,13 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/static/"):
             self._serve_static(path[len("/static/"):])
             return
-        if path in ("/wizard.html", "/admin.html", "/login.html"):
-            self._serve_static(path.lstrip("/"))
+        if path in ("/wizard.html", "/admin.html", "/login.html", "/login"):
+            initialized = (DATA_ROOT / ".config" / "config.yaml").is_file()
+            if not initialized and path not in ("/", "/wizard.html"):
+                self._redirect("/")
+                return
+            filename = "login.html" if path == "/login" else path.lstrip("/")
+            self._serve_static(filename)
             return
         if path == "/api/profile/avatar":
             from web.handlers import admin
@@ -459,7 +465,13 @@ def main(argv: list[str] | None = None) -> int:
             port = int(argv[i + 1])
 
     httpd = ThreadingHTTPServer((HOST, port), Handler)
-    _log(f"[wizard] 服务已启动: http://{HOST}:{port}/")
+    url = f"http://{HOST}:{port}/"
+    _log(f"[wizard] 服务已启动: {url}")
+    if not SELFTEST:
+        try:
+            webbrowser.open(url)
+        except Exception:
+            _log(f"[wizard] 请手动打开浏览器访问 {url}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

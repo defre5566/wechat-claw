@@ -93,10 +93,11 @@ def build_install_commands() -> list[dict]:
     if os.name == "nt" and _find_bundled() is not None:
         return [{"stage": "安装捆绑的 opencode",
                  "cmd": [sys.executable, "-m", "bridge.opencode_install"]}]
-    if sys.platform != "win32":
-        return [{"stage": "下载 opencode",
-                 "cmd": ["sh", "-c", "curl -fsSL https://opencode.ai/install.sh | sh"]}]
-    return []
+    if os.name == "nt":
+        return [{"stage": "下载安装 opencode",
+                 "cmd": ["sh", "-c", "curl -fsSL https://opencode.ai/install.ps1 | powershell -NoProfile -ExecutionPolicy Bypass -Command -"]}]
+    return [{"stage": "下载安装 opencode",
+             "cmd": ["sh", "-c", "curl -fsSL https://opencode.ai/install.sh | sh"]}]
 
 
 def install_done(app, ok: bool) -> None:
