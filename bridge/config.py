@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os as _os
 import shutil as _shutil
+import subprocess as _subprocess
 import sys as _sys
 from pathlib import Path
 
@@ -234,3 +235,12 @@ def resolve_opencode() -> str | None:
     if fallback.is_file() and _os.access(fallback, _os.X_OK):
         return str(fallback)
     return None
+
+
+def no_window_flags() -> int:
+    """Windows 下返回 CREATE_NO_WINDOW（0x08000000），其他平台返回 0。
+
+    用于 subprocess.Popen/run/asyncio.create_subprocess_exec 的 creationflags 参数，
+    防止子进程弹出控制台窗口。跨平台安全：POSIX 上 creationflags=0 被忽略不报错。
+    """
+    return 0x08000000 if _os.name == "nt" else 0

@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import get as get_cfg
-from bridge.config import MODULES_ROOT, PROJECT_ROOT
+from bridge.config import MODULES_ROOT, PROJECT_ROOT, no_window_flags
 from modules.registry_index import build_index
 
 from .state import SCHED_STATE_FILE, load_sched_state, prune_state_file, save_sched_state
@@ -185,7 +185,8 @@ async def run_module(name: str, args: list[str] | None = None) -> int:
     env["PYTHONPATH"] = os.pathsep.join(roots + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env,
+            creationflags=no_window_flags(),
         )
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout=RUN_TIMEOUT)

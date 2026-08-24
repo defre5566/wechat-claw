@@ -32,7 +32,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from bridge.config import DATA_ROOT, RESOURCE_ROOT
+from bridge.config import DATA_ROOT, RESOURCE_ROOT, no_window_flags
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("WEB_PORT", "8650"))
@@ -122,6 +122,7 @@ class Job:
                 p = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, encoding="utf-8", errors="replace",
+                    creationflags=no_window_flags(),
                 )
                 assert p.stdout is not None
                 # 读线程泵日志（Windows 无 select-pipe，跨平台统一线程方案）
@@ -527,11 +528,34 @@ def _maybe_seed_data_root() -> None:
         pass
 
 
+def _relaunch_from_data_root(argv: list[str]) -> bool:
+    """如果当前 exe 不在 DATA_ROOT 中，移交到 DATA_ROOT 副本后退出。
+
+    种子化完成后，原始 exe（Downloads 等）释放文件锁，用户可以删除安装包。
+    """
+    if not getattr(sys, "frozen", False):
+        return False
+    installed = DATA_ROOT / "wechat-claw.exe"
+    if not installed.is_file():
+        return False
+    current = Path(sys.executable).resolve()
+    if current == installed.resolve():
+        return False
+    _log(f"[wizard] 移交到 DATA_ROOT 副本: {installed}")
+    subprocess.Popen(
+        [str(installed)] + argv,
+        creationflags=no_window_flags(),
+    )
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
     # 首启种子化（仅 frozen 形态）：把平台代码从 RESOURCE_ROOT 复制到 DATA_ROOT，
     # 版本判断避免重复覆盖；不碰用户数据（.config/agent-SDK/modules_data/用户安装的模块）
     _maybe_seed_data_root()
+    if _relaunch_from_data_root(argv):
+        return 0
     # 打包形态 bridge 模式：`wechat-claw -m bridge.main`（service_up / nssm 启动命令）
     if len(argv) >= 2 and argv[0] == "-m" and argv[1] == "bridge.main":
         from bridge import main as bridge_main

@@ -21,7 +21,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from .config import get as get_cfg, WORK_ROOT
+from .config import get as get_cfg, WORK_ROOT, no_window_flags
 
 # 运行时根：按部署形态定位（打包形态 = 可执行文件旁，用户数据区）
 WORKDIR = WORK_ROOT
@@ -319,7 +319,8 @@ class BridgeCore:
         cmd = [sys.executable, str(script), "--inbound", text, "--conversation", conversation_id]
         try:
             proc = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                creationflags=no_window_flags(),
             )
             try:
                 out, err = await asyncio.wait_for(proc.communicate(), timeout=RUN_TIMEOUT)

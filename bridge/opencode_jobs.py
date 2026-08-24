@@ -645,6 +645,7 @@ def _write_json_atomic(path: Path, data: dict) -> None:
 def _supervisor_exec(job_path: str) -> int:
     """执行单个 job（平台定时器触发）。防重锁 → 置 running → 执行 opencode → 状态写回 → jsonl 日志。"""
     import uuid
+    from bridge.config import no_window_flags
     job_path_p = Path(job_path)
     job = json.loads(job_path_p.read_text(encoding="utf-8"))
     slug = str(job.get("slug") or "")
@@ -703,7 +704,8 @@ def _supervisor_exec(job_path: str) -> int:
     timeout = int(job.get("timeoutSeconds") or 1800)
     try:
         r = subprocess.run(cmd, cwd=str(job.get("workdir") or Path.cwd()), env=env,
-                           capture_output=True, text=True, timeout=timeout)
+                           capture_output=True, text=True, timeout=timeout,
+                           creationflags=no_window_flags())
         status = "ok" if r.returncode == 0 else "failed"
         _mark_job_state(job_path_p, job, status=status, exit_code=r.returncode,
                         error=None if r.returncode == 0 else (r.stderr or r.stdout or "")[-500:])

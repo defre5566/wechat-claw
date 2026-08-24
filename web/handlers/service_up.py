@@ -22,7 +22,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from bridge.config import DATA_ROOT, DEPLOY_ROOT, RESOURCE_ROOT
+from bridge.config import DATA_ROOT, DEPLOY_ROOT, RESOURCE_ROOT, no_window_flags
 
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 WEB_PORT = 8650
@@ -221,6 +221,7 @@ def _nssm() -> list[dict]:
          [str(nssm), "set", "wechat-bridge", "AppDirectory", str(DEPLOY_ROOT)],
          [str(nssm), "set", "wechat-bridge", "AppExit", "Default", "Restart"],
          [str(nssm), "set", "wechat-bridge", "AppRestartDelay", "10000"],
+         [str(nssm), "set", "wechat-bridge", "AppNoConsole", "1"],
          [str(nssm), "start", "wechat-bridge"]],
     )
 
@@ -471,7 +472,7 @@ def _spawn_bridge_now() -> list[dict]:
     py = _frozen_program()
     kwargs: dict = {"cwd": str(DEPLOY_ROOT)}
     if os.name == "nt":
-        kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW：无控制台窗口
+        kwargs["creationflags"] = no_window_flags()  # CREATE_NO_WINDOW：无控制台窗口
         kwargs["close_fds"] = True
     else:
         kwargs["start_new_session"] = True
