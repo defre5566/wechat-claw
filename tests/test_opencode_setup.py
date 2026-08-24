@@ -71,7 +71,7 @@ def test_detect_prefers_deploy_dir_over_official(monkeypatch, tmp_path):
 
 
 def test_install_bundled_sync_copies_with_platform_name(monkeypatch, tmp_path):
-    """捆绑部署：复制到部署目录，文件名按平台（Linux 不带 .exe）。"""
+    """捆绑部署：复制到部署目录并装后验证（文件名按平台，Linux 不带 .exe）。"""
     install_dir = _make_exe(tmp_path, monkeypatch)
     bundled = tmp_path / "vendor" / "opencode" / osu._bin_name()
     bundled.parent.mkdir(parents=True)
@@ -80,9 +80,41 @@ def test_install_bundled_sync_copies_with_platform_name(monkeypatch, tmp_path):
     monkeypatch.setattr(osu, "_INSTALL_MARKER", tmp_path / ".config" / "marker.json")
     monkeypatch.setattr(osu.subprocess, "run",
                         lambda *a, **kw: FakeProc(rc=0, out="opencode 1.18"))
-    assert osu.install_bundled_sync() is True
+    ok, err = osu.install_bundled_sync()
+    assert ok is True, err
     deployed = install_dir / osu._bin_name()
     assert deployed.is_file() and deployed.read_bytes() == b"binary"
+    assert (tmp_path / ".config" / "marker.json").is_file()
+
+
+def test_install_bundled_sync_verify_failure_cleanup(monkeypatch, tmp_path):
+    """装后验证失败（--version 跑不通）：删坏文件 + 返回 Defender 提示错误，杜绝假成功。"""
+    install_dir = _make_exe(tmp_path, monkeypatch)
+    bundled = tmp_path / "vendor" / "opencode" / osu._bin_name()
+    bundled.parent.mkdir(parents=True)
+    bundled.write_bytes(b"corrupt")
+    monkeypatch.setattr(osu, "_find_bundled", lambda: bundled)
+    monkeypatch.setattr(osu, "_INSTALL_MARKER", tmp_path / ".config" / "marker.json")
+    monkeypatch.setattr(osu.subprocess, "run",
+                        lambda *a, **kw: FakeProc(rc=1, out=""))
+    ok, err = osu.install_bundled_sync()
+    assert ok is False
+    assert "验证失败" in err and "Defender" in err
+    assert not (install_dir / osu._bin_name()).exists()  # 坏文件已清理
+
+
+def test_detect_installed_logs_to_web_log(monkeypatch, tmp_path):
+    """检测命中写诊断日志（路径+版本）到数据根 logs/web.log。"""
+    install_dir = _make_exe(tmp_path, monkeypatch)
+    monkeypatch.setattr(osu, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(osu, "_INSTALL_DIR", install_dir)  # DATA_ROOT patch 后重指
+    (install_dir / osu._bin_name()).write_text("x", encoding="utf-8")
+    monkeypatch.setattr(osu.subprocess, "run",
+                        lambda *a, **kw: FakeProc(rc=0, out="opencode 1.18.21"))
+    r = osu.detect_installed()
+    assert r is not None
+    log_text = (tmp_path / "logs" / "web.log").read_text(encoding="utf-8")
+    assert "检测命中" in log_text and str(install_dir / osu._bin_name()) in log_text
 
 
 def test_build_install_commands_no_sh_windows(monkeypatch, tmp_path):

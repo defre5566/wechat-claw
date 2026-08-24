@@ -82,10 +82,36 @@ def _fetch(url: str, connect_budget: int = 20, total_budget: int = 300) -> bytes
     return result["data"]
 
 
-def _download_opencode() -> bool:
-    """下载 opencode-windows-x64.zip 并解压到 vendor/opencode/opencode.exe。"""
+def _pick_exe_from_zip(data: bytes) -> bytes | None:
+    """从 zip 中精确提取 opencode.exe：basename 精确匹配 + PE magic + 大小下限。
+
+    旧实现子串匹配过松（opencode.exe.sha256 等也命中）且后写覆盖先写，
+    可能捆绑进几十字节的校验文件而非真 exe。
+    """
     import io
     import zipfile
+    z = zipfile.ZipFile(io.BytesIO(data))
+    candidates = []
+    for name in z.namelist():
+        base = name.replace("\\", "/").rstrip("/").split("/")[-1].lower()
+        if base != "opencode.exe" or name.endswith("/"):
+            continue
+        with z.open(name) as f:
+            content = f.read()
+        if content[:2] != b"MZ":  # PE 可执行头
+            print(f"[build] 跳过非 PE 条目: {name}（{len(content)} 字节）")
+            continue
+        if len(content) < 10 * 1024 * 1024:  # 真实 opencode >100MB；<10MB 必为异常
+            print(f"[build] 跳过异常小条目: {name}（{len(content) / 1024 / 1024:.1f} MB）")
+            continue
+        candidates.append(content)
+    if not candidates:
+        return None
+    return max(candidates, key=len)  # 多候选取最大（防御性）
+
+
+def _download_opencode() -> bool:
+    """下载 opencode-windows-x64.zip 并解压到 vendor/opencode/opencode.exe。"""
     oc = ROOT / "vendor" / "opencode" / "opencode.exe"
     if oc.is_file():
         print(f"[build] opencode 已存在（{oc.stat().st_size / 1024 / 1024:.1f} MB），跳过下载")
@@ -101,15 +127,13 @@ def _download_opencode() -> bool:
             data = _fetch(url)
             if data[:2] != b"PK":  # 镜像假 200（HTML 错误页）快速跳过
                 raise ValueError("返回内容非 zip（镜像失效）")
-            z = zipfile.ZipFile(io.BytesIO(data))
-            for name in z.namelist():
-                if "opencode.exe" in name or "opencode" in name.lower() and not name.endswith("/"):
-                    with z.open(name) as f:
-                        oc.write_bytes(f.read())
-                    oc.chmod(0o755)
-                    print(f"[build] opencode 下载完成（{oc.stat().st_size / 1024 / 1024:.1f} MB）")
-                    return True
-            print(f"[build] zip 中未找到 opencode.exe")
+            exe = _pick_exe_from_zip(data)
+            if exe is None:
+                raise ValueError("zip 中未找到合格的 opencode.exe（精确名 + PE 头 + ≥10MB）")
+            oc.write_bytes(exe)
+            oc.chmod(0o755)
+            print(f"[build] opencode 下载完成（{oc.stat().st_size / 1024 / 1024:.1f} MB）")
+            return True
         except Exception as e:
             print(f"[build] 下载失败: {e}")
             continue

@@ -2,14 +2,12 @@
 from __future__ import annotations
 
 import json
-import os
 
 import yaml
 
 from bridge.config import CONFIG_FILE, DEFAULTS_USER, DATA_ROOT, RESOURCE_ROOT
 from modules.common import crypto as crypto_mod
 from web import auth
-from web.handlers.opencode_setup import detect_installed
 
 OPCODE_CONFIG = DATA_ROOT / "opencode.jsonc"
 
@@ -21,11 +19,9 @@ def _gen_config() -> dict:
     try:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         cfg = json.loads(json.dumps(DEFAULTS_USER))
-        # opencode 自动安装于用户目录（~/.opencode/bin）：acp.command 写绝对路径，
-        # 避免 systemd/nssm 拉起 bridge 的环境 PATH 不含该目录
-        d = detect_installed()
-        if d and d.get("path") and os.path.isabs(d["path"]):
-            cfg["acp"] = {**(cfg.get("acp") or {}), "command": d["path"]}
+        # acp.command 保持裸名 "opencode"：resolve_opencode() 有三处 fallback
+        # （PATH → 数据根/bin → ~/.opencode/bin）覆盖服务化场景；烤死检测时的绝对
+        # 路径反而会因文件事后失效（安全软件隔离/手动删除）硬 fail 整个 bridge
         CONFIG_FILE.write_text(
             yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
             encoding="utf-8",

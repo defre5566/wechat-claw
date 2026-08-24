@@ -28,10 +28,22 @@ _OFFICIAL_DIR = os.path.expanduser("~/.opencode/bin")
 _DOC_URL = "https://github.com/anomalyco/opencode/releases"
 
 # 向导安装标记：存在 = opencode 由 wechat-claw 安装（XDG 数据收敛到数据根、卸载时一并删除）
-from bridge.config import DATA_ROOT, RESOURCE_ROOT  # noqa: E402
+from bridge.config import DATA_ROOT, RESOURCE_ROOT, no_window_flags  # noqa: E402
 
 _INSTALL_DIR = DATA_ROOT / "bin"  # 本系统部署目录（收敛到工作目录根）
 _INSTALL_MARKER = DATA_ROOT / ".config" / "opencode-installed.json"
+
+
+def _diag_log(msg: str) -> None:
+    """诊断留痕：落数据根 logs/web.log（检测/安装的关键节点，排查"检测得到、启动没有"类问题）。"""
+    try:
+        from datetime import datetime as _dt
+        log_file = DATA_ROOT / "logs" / "web.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"{_dt.now():%Y-%m-%d %H:%M:%S} [opencode] {msg}\n")
+    except Exception:
+        pass
 
 # 下载源：GitHub release + 镜像（前缀拼官方 URL，空串 = 官方直连）。
 # ghproxy.com 已失效（200 返回 HTML 错误页 + 读挂起）不再收录；
@@ -78,15 +90,20 @@ def detect_installed() -> dict | None:
         # 刚解压/杀软（Defender 实时扫描）期 --version 可能瞬时失败：重试 3 次再判不存在
         for attempt in (1, 2, 3):
             try:
-                r = subprocess.run([p, "--version"], capture_output=True, text=True, timeout=15)
+                r = subprocess.run([p, "--version"], capture_output=True, text=True,
+                                   timeout=15, creationflags=no_window_flags())
             except Exception:
                 r = None
             if r is not None and r.returncode == 0:
                 out = (r.stdout or r.stderr or "").strip().splitlines()
-                return {"version": out[0] if out else "已安装", "path": p}
+                version = out[0] if out else "已安装"
+                _diag_log(f"检测命中: {p} -> {version}")
+                return {"version": version, "path": p}
             if attempt < 3:
                 import time
                 time.sleep(0.5)
+    if cands:
+        _diag_log(f"检测未命中（候选 {cands}，--version 全失败/文件消失）")
     return None
 
 
@@ -114,19 +131,53 @@ def _write_marker(method: str) -> None:
     )
 
 
-def install_bundled_sync() -> bool:
-    """同步安装捆绑的 opencode（零子进程、零转义、零竞态）。"""
-    bundled = _find_bundled()
-    if bundled is None:
-        return False
-    install_dir = Path(_INSTALL_DIR)
-    install_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(str(bundled), str(install_dir / _bin_name()))
+def _verify_installed(target: Path, method: str) -> tuple[bool, str]:
+    """装后验证：对刚落地的 target 本身跑 --version（防 PATH 里其他 opencode 干扰），
+    成功写 marker；失败删坏文件并返回错误。
+
+    防两类假成功：① 捆绑/下载的文件本身损坏 ② 复制后被安全软件（Defender 实时
+    扫描）秒隔离——UI 显示已安装、实际启动即消失。
+    """
+    import time
+    for attempt in (1, 2, 3):  # 刚落地/杀软扫描期瞬时失败重试
+        try:
+            r = subprocess.run([str(target), "--version"], capture_output=True, text=True,
+                               timeout=15, creationflags=no_window_flags())
+        except Exception:
+            r = None
+        if r is not None and r.returncode == 0:
+            out = (r.stdout or r.stderr or "").strip().splitlines()
+            _diag_log(f"装后验证通过: {target} -> {out[0] if out else '(无输出)'}")
+            try:
+                _write_marker(method)
+            except OSError:
+                pass
+            return True, ""
+        if attempt < 3:
+            time.sleep(0.5)
+    # 验证失败：清理坏文件（下次安装干净重来），明确报错
     try:
-        _write_marker("autostart")
+        if target.is_file():
+            target.unlink()
     except OSError:
         pass
-    return True
+    err = (f"安装的 opencode 验证失败（{target} 无法运行或已被移除）。"
+           "可能被安全软件（Windows Defender 实时防护）隔离，"
+           "请将数据根 bin/ 目录加入白名单后重试")
+    _diag_log(f"装后验证失败: {err}")
+    return False, err
+
+
+def install_bundled_sync() -> tuple[bool, str]:
+    """同步安装捆绑的 opencode（零子进程、零转义、零竞态）。返回 (ok, error)。"""
+    bundled = _find_bundled()
+    if bundled is None:
+        return False, "未找到捆绑的 opencode"
+    install_dir = Path(_INSTALL_DIR)
+    install_dir.mkdir(parents=True, exist_ok=True)
+    target = install_dir / _bin_name()
+    shutil.copy2(str(bundled), str(target))
+    return _verify_installed(target, "autostart")
 
 
 def _download_bytes(url: str, connect_budget: int = 20, total_budget: int = 240) -> bytes:
@@ -233,6 +284,8 @@ def download_install_sync() -> tuple[bool, str]:
     exe = _extract_exe(data, asset)
     if exe is None:
         return False, f"{asset} 中未找到 opencode 可执行文件"
+    if len(exe) < 5 * 1024 * 1024:  # 真实 opencode >100MB；<5MB 必为错误内容
+        return False, f"{asset} 解压出的可执行文件异常（{len(exe)} 字节），请重试"
     install_dir = Path(_INSTALL_DIR)
     install_dir.mkdir(parents=True, exist_ok=True)
     target = install_dir / _bin_name()
@@ -240,11 +293,8 @@ def download_install_sync() -> tuple[bool, str]:
     if os.name != "nt":
         target.chmod(0o755)
     print(f"[install] 已安装到 {target}")
-    try:
-        _write_marker("download")
-    except OSError:
-        pass
-    return True, ""
+    ok, err = _verify_installed(target, "download")
+    return ok, err
 
 
 def run_install_cli(argv: list[str]) -> int:
@@ -286,7 +336,7 @@ def detect(app, body: dict | None = None) -> dict:
     d = detect_installed()
     if d:
         app.steps["opencode"] = True
-        return {"ok": True, "already": True, "version": d["version"]}
+        return {"ok": True, "already": True, "version": d["version"], "path": d["path"]}
     return {
         "ok": False,
         "missing": True,
@@ -307,11 +357,13 @@ def install(app, body: dict | None = None) -> dict:
         app.steps["opencode"] = True
         return {"ok": True, "already": True, "version": d["version"]}
     if _find_bundled() is not None:
-        if install_bundled_sync():
+        ok, err = install_bundled_sync()
+        if ok:
             d2 = detect_installed()
             app.steps["opencode"] = True
-            return {"ok": True, "installed": True, "version": d2["version"] if d2 else ""}
-        return {"ok": False, "error": "捆绑的 opencode 部署失败（检查数据根 bin/ 目录权限）"}, 500
+            return {"ok": True, "installed": True, "version": d2["version"] if d2 else "",
+                    "path": str(d2["path"]) if d2 else ""}
+        return {"ok": False, "error": err}, 500
     if app.job_running():
         return {"ok": False, "error": "已有任务运行中"}, 409
     cmds = build_install_commands()

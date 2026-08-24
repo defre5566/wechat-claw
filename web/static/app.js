@@ -473,8 +473,8 @@ function renderWizard() {
     return fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).then(r => r.json().catch(() => ({})));
   }
   function ocArea(html) { const a = $("#ocArea"); if (a) a.innerHTML = html; }
-  function ocInstalled(version) {
-    ocArea(`<div class="check-row ok"><b>✓</b><span>opencode 已安装</span><small>${esc(version || "")}</small></div>`);
+  function ocInstalled(version, path) {
+    ocArea(`<div class="check-row ok"><b>✓</b><span>opencode 已安装</span><small>${esc(version || "")}${path ? " · " + esc(path) : ""}</small></div>`);
     const btn = $("#ocInstall"); if (btn) { btn.textContent = "✓ 已安装"; btn.disabled = true; }
     ocHideProgress();
     markDone(1);
@@ -495,7 +495,7 @@ function renderWizard() {
   function ocDetect(cb) {
     ocArea(`<div class="check-row"><b>…</b><span>正在检测 opencode…</span></div>`);
     ocPost("/api/opencode/detect").then(d => {
-      if (d.already) { ocInstalled(d.version); cb && cb(true); }
+      if (d.already) { ocInstalled(d.version, d.path); cb && cb(true); }
       else if (d.missing) { ocMissing(d.bundled); cb && cb(false); }
       else { ocArea(`<div class="check-row fail"><b>!</b><span>${esc(d.error || "检测失败")}</span></div>`); cb && cb(false); }
     }).catch(e => { ocArea(`<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`); cb && cb(false); });
@@ -552,9 +552,9 @@ function renderWizard() {
   function ocInstall() {
     const btn = $("#ocInstall"); btn.disabled = true; btn.textContent = "准备安装…";
     ocPost("/api/opencode/install").then(d => {
-      if (d.already) { ocInstalled(d.version); return; }
+      if (d.already) { ocInstalled(d.version, d.path); return; }
       // 有捆绑 → 后端同步部署完成，直接带版本返回，无需轮询/重试
-      if (d.installed) { ocInstalled(d.version); return; }
+      if (d.installed) { ocInstalled(d.version, d.path); return; }
       ocPollStart();
     }).catch(e => { btn.disabled = false; btn.textContent = "安装 opencode"; ocArea(`<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`); });
   }

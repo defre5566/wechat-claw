@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import time
+from contextlib import contextmanager
 from datetime import datetime
 
 from acp.schema import (
@@ -29,6 +30,33 @@ from .state import (
 )
 
 log = logging.getLogger("wechat-bridge")
+
+
+@contextmanager
+def _quiet_asyncio_exec():
+    """在作用域内给 asyncio.create_subprocess_exec 注入 Windows 无窗口标志。
+
+    acp 包（site-packages）的 spawn_stdio_transport 不接受 creationflags 参数，
+    exe 形态（windowed 无控制台）下拉起控制台程序 opencode.exe 会弹新控制台窗口。
+    此处运行时包装注入（setdefault 不覆盖显式传参），退出即还原——不修改
+    site-packages 磁盘文件（venv 重建/重打包不失效），不碰命令解析链。
+    作用域仅覆盖 ACP 这一次 spawn；POSIX 上 flags=0 无影响。
+    """
+    from .config import no_window_flags
+    if not no_window_flags():
+        yield  # POSIX：无需注入
+        return
+    orig = asyncio.create_subprocess_exec
+
+    def _quiet_exec(*args, **kwargs):
+        kwargs.setdefault("creationflags", no_window_flags())
+        return orig(*args, **kwargs)
+
+    asyncio.create_subprocess_exec = _quiet_exec
+    try:
+        yield
+    finally:
+        asyncio.create_subprocess_exec = orig
 
 
 class PermissionGate:
@@ -153,7 +181,8 @@ class ConfirmAcpAgent(AcpAgent):
             client, self._command, *self._args, env=spawn_env, cwd=self._cwd,
         )
         try:
-            self._conn, self._process = await self._ctx.__aenter__()
+            with _quiet_asyncio_exec():  # Windows：ACP 子进程无窗口（防 opencode 控制台弹框）
+                self._conn, self._process = await self._ctx.__aenter__()
         except FileNotFoundError as e:
             # 自启/nssm 等场景 PATH 受限：带实际 command 值落地诊断，WinError 2 不再裸抛
             log.error(

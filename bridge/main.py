@@ -69,16 +69,28 @@ def resolve_acp_command() -> str:
     """解析 opencode 可执行文件（fail-fast）：找不到直接退出，不裸名盲试 spawn。
 
     旧实现回退裸 "opencode"：服务化（nssm/systemd）PATH 不含用户目录时
-    spawn 抛 WinError 2 / FileNotFoundError，信息量为零。现改为启动即明确报错。
+    spawn 抛 WinError 2 / FileNotFoundError，信息量为零。现改为启动即明确报错，
+    并逐路径列存在性（排查"检测得到、启动没有"类问题不用再猜）。
     """
-    from .config import resolve_opencode
+    from .config import resolve_opencode, WORK_ROOT
     cmd = resolve_opencode()
     if cmd:
+        log.info("[acp] opencode 解析成功: %s", cmd)
         return cmd
+    import shutil as _shutil
+    from pathlib import Path as _Path
+    checked = {
+        "PATH": _shutil.which("opencode") or "(无)",
+        "数据根bin": str(WORK_ROOT / "bin" / ("opencode.exe" if sys.platform == "win32" else "opencode")),
+        "官方目录": str(_Path.home() / ".opencode" / "bin"),
+    }
     log.critical(
-        "[acp] opencode 未找到（已查 %s）。请到 web 初始化向导第二步安装 opencode，"
-        "或在 config.yaml 的 acp.command 配置绝对路径后重启 bridge",
-        OPENCODE_LOOKUP_HINT,
+        "[acp] opencode 未找到。逐路径存在性: PATH=%s | %s 存在=%s | %s 存在=%s。"
+        "请到 web 初始化向导第二步安装 opencode，或在 config.yaml 的 acp.command "
+        "配置绝对路径后重启 bridge",
+        checked["PATH"],
+        checked["数据根bin"], _Path(checked["数据根bin"]).is_file(),
+        checked["官方目录"], _Path(checked["官方目录"]).exists(),
     )
     raise SystemExit(1)  # 非零退出，nssm/systemd 可感知
 
