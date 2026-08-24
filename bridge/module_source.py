@@ -2,8 +2,8 @@
 
 数据：modules/modules_data/sources.json（用户数据区，随备份）。
 源：builtin 官方源（defre5566/wechat-claw_modules_official，不可删）+ 自定义（github / local）。
-拉取：GitHub 浅 clone（--depth 1）到临时目录 / 本地源直接读 → 读 manifest.json →
-      模块列表缓存 + 源指纹（manifest 内容 sha256，变更检测：指纹变 → 刷新缓存）。
+拉取：HTTP ZIP 归档下载（零 git 依赖，普通用户无需装 git）到临时目录 / 本地源直接读
+      → 读 manifest.json → 模块列表缓存 + 源指纹（manifest 内容 sha256，变更检测）。
 校验（安装时）：清单一致（manifest.files vs 实际文件）+ 结构规范（module.json/worker 对齐 docs/04）
                 + 哈希（模块包 sha256 = files 内容排序拼接；不符自动重拉一次再校验）。
 安装：复制到 modules/<name>/ → register 发 token + 建数据目录 + enabled:false → 刷新缓存/豁免。
@@ -15,9 +15,7 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 from bridge.config import MODULES_ROOT
@@ -31,7 +29,9 @@ OFFICIAL_SOURCE = {
     "id": "official",
     "name": "官方模块库",
     "type": "github",
-    "url": "https://gitee.com/defre5566/wechat-claw_modules_official.git",
+    # GitHub 主源（codeload ZIP 纯 HTTP 无登录，镜像轮询国内可达）；
+    # gitee.com/defre5566/wechat-claw_modules_official 为同 commit 实时镜像，仅作参考
+    "url": "https://github.com/defre5566/wechat-claw_modules_official.git",
     "builtin": True,
     "added_at": "",
     "fingerprint": "",
@@ -88,55 +88,96 @@ _GIT_MIRRORS = [
 ]
 
 
-def _git_clone(url: str, dest: Path) -> bool:
-    """克隆仓库到目标目录。
+def _fetch_url(url: str, timeout: int = 30, budget: int = 120) -> bytes:
+    """下载 URL 全量内容，分阶段预算（与 opencode 安装器同方案）。
 
-    Gitee（默认，国内快）：git clone 直连（网络无阻）。
-    GitHub（兜底）：ZIP 下载 + 镜像轮询（受限网络适用）。
+    DNS 挂起不受 urlopen timeout 控制——连接期 Event 短预算 + 下载期总预算。
+    模块库仅几 MB，预算比 opencode（58MB）紧。
+    """
+    import threading
+    import urllib.request
+    connected = threading.Event()
+    result: dict = {}
+
+    def _worker() -> None:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "wechat-claw-module-source"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                connected.set()
+                chunks: list[bytes] = []
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                result["data"] = b"".join(chunks)
+        except Exception as e:  # noqa: BLE001
+            result["err"] = e
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    if not connected.wait(20):
+        raise TimeoutError("20s 内未建立连接（DNS/网络挂起）")
+    t.join(budget - 20)
+    if t.is_alive():
+        raise TimeoutError(f"下载超总预算 {budget}s")
+    if "err" in result:
+        raise result["err"]
+    return result["data"]
+
+
+def _extract_zip_top(zip_data: bytes, dest: Path) -> bool:
+    """解压 ZIP 并把顶层目录（repo-root）内容落位到 dest；失败返回 False。"""
+    import io
+    import tempfile
+    import zipfile
+    if zip_data[:2] != b"PK":  # 假 200（HTML 错误页）快速拒收
+        return False
+    z = zipfile.ZipFile(io.BytesIO(zip_data))
+    names = z.namelist()
+    top = names[0].split("/")[0] if names else ""
+    if not top:
+        return False
+    tmp = Path(tempfile.mkdtemp(prefix="wc-source-"))
+    try:
+        z.extractall(tmp)
+        if not (tmp / top).is_dir():
+            return False
+        if dest.is_dir():
+            shutil.rmtree(dest)
+        shutil.move(str(tmp / top), str(dest))
+        return True
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _git_clone(url: str, dest: Path) -> bool:
+    """拉取仓库内容到目标目录（零 git 依赖，纯 HTTP ZIP 归档）。
+
+    - GitHub（官方源与自定义源统一）：codeload archive 直连 + 镜像轮询
+      （gitee 归档需登录+打包交互，纯 HTTP 不可用，故官方源用 GitHub 主源）
+    - gitee URL（兼容旧 sources.json 残留）：转 GitHub 同名仓库拉取
+    安全校验与 git clone 等位：后续 manifest 验签 + 模块 sha256 把关（传输损坏/篡改会被拒）。
     """
     if url.startswith("https://gitee.com/") and url.endswith(".git"):
-        # Gitee 直连 git clone（国内访问无问题）
-        try:
-            r = subprocess.run(
-                ["git", "clone", "--depth", "1", "--quiet", url, str(dest)],
-                capture_output=True, text=True, timeout=120,
-            )
-            return r.returncode == 0
-        except Exception:
-            return False
-    if url.startswith("https://github.com/") and url.endswith(".git"):
-        # GitHub：ZIP 下载 + 镜像轮询
-        import io
-        import urllib.request
-        import zipfile
-        repo_path = url[len("https://github.com/"):-len(".git")]
-        zip_urls = []
-        for m in _GIT_MIRRORS:
-            zip_urls.append(f"{m}/{repo_path}/archive/refs/heads/main.zip")
-        seen = set()
-        for zu in zip_urls:
-            if zu in seen:
-                continue
-            seen.add(zu)
-            try:
-                req = urllib.request.Request(zu, headers={"User-Agent": "wechat-claw-module-source"})
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    data = resp.read()
-                z = zipfile.ZipFile(io.BytesIO(data))
-                top = z.namelist()[0].split("/")[0] if z.namelist() else ""
-                if not top:
-                    continue
-                tmp = Path(tempfile.mkdtemp(prefix="wc-source-"))
-                z.extractall(tmp)
-                if (tmp / top).is_dir():
-                    if dest.is_dir():
-                        shutil.rmtree(dest)
-                    shutil.move(str(tmp / top), str(dest))
-                shutil.rmtree(tmp, ignore_errors=True)
-                return True
-            except Exception:
-                continue
+        # 旧官方源地址：转 GitHub 镜像（同 commit 实时同步）
+        url = "https://github.com/" + url[len("https://gitee.com/"):]
+    if not (url.startswith("https://github.com/") and url.endswith(".git")):
         return False
+    repo_path = url[len("https://github.com/"):-len(".git")]
+    # codeload 直连放首位（纯 HTTP、无登录墙）；镜像代理兜底（国内受限网络）
+    urls = [f"https://codeload.github.com/{repo_path}/zip/refs/heads/main"]
+    for m in _GIT_MIRRORS:
+        zu = f"{m}/{repo_path}/archive/refs/heads/main.zip"
+        if zu not in urls:
+            urls.append(zu)
+    for zu in urls:
+        try:
+            data = _fetch_url(zu)
+            if _extract_zip_top(data, dest):
+                return True
+        except Exception:
+            continue
     return False
 
 

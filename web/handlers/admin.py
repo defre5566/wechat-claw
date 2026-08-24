@@ -810,7 +810,10 @@ def version_get(app, body: dict | None = None) -> dict:
 
 def gitpull_get(app, body: dict | None = None) -> dict:
     """源码 git pull 更新（高级设置页按钮调用）。"""
+    import shutil as _shutil
     import subprocess
+    if not _shutil.which("git"):
+        return {"ok": False, "error": "本机未安装 git，无法源码更新；请使用「下载最新版」升级 exe"}
     try:
         r = subprocess.run(["git", "pull"], capture_output=True, text=True, timeout=60, cwd=str(DATA_ROOT))
         if r.returncode != 0:

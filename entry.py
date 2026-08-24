@@ -65,12 +65,12 @@ def _maybe_seed_data_root() -> None:
                     pass
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(f, dst)
-    exe_src = sys.executable
+    exe_src = Path(sys.executable)  # sys.executable 是 str；不转 Path 时 .read_bytes 抛 AttributeError
     exe_dst = DATA_ROOT_ / "wechat-claw.exe"
     try:
-        if exe_dst.is_file() and exe_dst.read_bytes() == exe_src.read_bytes():
-            pass
-        else:
+        import filecmp
+        same = exe_dst.is_file() and filecmp.cmp(exe_src, exe_dst, shallow=False)
+        if not same:
             exe_dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(exe_src, exe_dst)
     except OSError:
