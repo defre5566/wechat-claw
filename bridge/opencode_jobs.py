@@ -326,11 +326,17 @@ def _job_env() -> dict:
 
 
 def _program() -> str:
-    """定时器 ExecStart 的程序入口：源码形态 = venv python；打包形态 = exe 自身。
+    """定时器 ExecStart 的程序入口：源码形态 = venv python；打包形态 = 部署目录 exe。
 
+    onedir 下 sys._MEIPASS 指向 _internal/，其父目录即部署根。
     统一调用：<program> -m bridge.opencode_jobs supervisor <job.json>
     """
     if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            cand = Path(meipass).parent / "wechat-claw.exe"
+            if cand.is_file():
+                return str(cand)
         return sys.executable
     from bridge.config import DEPLOY_ROOT
     return str(DEPLOY_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))

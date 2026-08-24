@@ -50,6 +50,10 @@ def build_index() -> dict:
     if now - _cache["ts"] < _CACHE_TTL:
         return _cache["index"]
     index: dict[str, dict] = {}
+    if not MODULES_DIR.is_dir():
+        _cache["ts"] = time.monotonic()
+        _cache["index"] = index
+        return index
     for mod_dir in sorted(MODULES_DIR.iterdir()):
         if not mod_dir.is_dir():
             continue

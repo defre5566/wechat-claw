@@ -12,6 +12,7 @@ import importlib
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -470,8 +471,55 @@ def _maybe_autostart_opencode(app: WizardApp) -> bool:
         _log("[wizard] opencode 未安装，已在后台启动自动安装（web 界面可看进度）")
         return True
     return False
+def _maybe_seed_data_root() -> None:
+    """首启种子化（仅 frozen 形态）：复制平台代码到 DATA_ROOT，版本判断避免重复覆盖。
+
+    复制的目录：bridge/、modules/（基础库 register.py/common/ 等）、patches/、web/。
+    不碰的用户数据：.config/、agent-SDK/、logs/、modules/modules_data/、modules/todo/ 等。
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    import hashlib
+    from bridge.config import VERSION
+    from bridge.config import DATA_ROOT as _DATA_ROOT
+    from bridge.config import RESOURCE_ROOT as _RES_ROOT
+    ver_file = _DATA_ROOT / ".version"
+    local_ver = ver_file.read_text().strip() if ver_file.is_file() else ""
+    if local_ver == VERSION:
+        return  # 版本一致，跳过
+    if local_ver and local_ver > VERSION:
+        _log(f"[wizard] 本地版本 {local_ver} 高于 exe 版本 {VERSION}，跳过复制")
+        return
+    for dirname in ("bridge", "modules", "patches", "web"):
+        src = _RES_ROOT / dirname
+        if not src.is_dir():
+            continue
+        for f in src.rglob("*"):
+            if "__pycache__" in f.parts or f.suffix == ".pyc" or not f.is_file():
+                continue
+            rel = f.relative_to(src)
+            dst = _DATA_ROOT / dirname / rel
+            if dst.is_file():
+                try:
+                    if hashlib.sha256(dst.read_bytes()).hexdigest() == hashlib.sha256(f.read_bytes()).hexdigest():
+                        continue
+                except OSError:
+                    pass
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dst)
+    # 写入版本号
+    try:
+        ver_file.write_text(VERSION, encoding="utf-8")
+        _log(f"[wizard] 首启种子化完成（版本 {VERSION}）")
+    except OSError:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
+    # 首启种子化（仅 frozen 形态）：把平台代码从 RESOURCE_ROOT 复制到 DATA_ROOT，
+    # 版本判断避免重复覆盖；不碰用户数据（.config/agent-SDK/modules_data/用户安装的模块）
+    _maybe_seed_data_root()
     # 打包形态 bridge 模式：`wechat-claw -m bridge.main`（service_up / nssm 启动命令）
     if len(argv) >= 2 and argv[0] == "-m" and argv[1] == "bridge.main":
         from bridge import main as bridge_main

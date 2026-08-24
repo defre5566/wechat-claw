@@ -128,11 +128,27 @@ def _exec_commands(commands: list[list[str]], timeout: int = 180) -> list[dict]:
 
 
 def _bridge_command() -> str:
-    """bridge 启动命令：打包形态 = 可执行文件自身；源码形态 = venv python -m bridge.main。"""
+    """bridge 启动命令：打包形态 = 部署目录 exe；源码形态 = venv python -m bridge.main。"""
     if getattr(sys, "frozen", False):
-        return sys.executable
+        return _frozen_program()
     py = DEPLOY_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     return f"{py} -m bridge.main"
+
+
+def _frozen_program() -> str:
+    """onedir 打包形态的程序入口：部署根目录的 exe（而非临时解包路径）。
+
+    onedir 下 sys._MEIPASS 指向 _internal/，其父目录即部署根，
+    wechat-claw.exe 在该目录下。nssm/定时器/快捷方式都应指向此 exe。
+    """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            cand = Path(meipass).parent / "wechat-claw.exe"
+            if cand.is_file():
+                return str(cand)
+        return sys.executable
+    return str(DEPLOY_ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python"))
 
 
 def _systemd() -> list[dict]:
@@ -197,8 +213,7 @@ def _nssm() -> list[dict]:
         return [{"cmd": "Windows 平台才支持 nssm", "ok": False}]
     arch = "win64" if sys.maxsize > 2 ** 32 else "win32"
     nssm = RESOURCE_ROOT / "vendor" / "nssm" / f"{arch}.exe"
-    py = sys.executable if getattr(sys, "frozen", False) \
-        else str(DEPLOY_ROOT / ".venv" / "Scripts" / "python.exe")
+    py = _frozen_program()
     if not nssm.is_file():
         return [{"cmd": f"nssm 缺失: {nssm}", "ok": False}]
     return _write_and_run(
@@ -228,8 +243,7 @@ def _user_autostart_reg() -> list[dict]:
     if os.name != "nt":
         return [{"cmd": "仅 Windows 支持用户级自启", "ok": False}]
     vbs = DATA_ROOT / "wechat-claw-bridge.vbs"
-    py = sys.executable if getattr(sys, "frozen", False) \
-        else str(DEPLOY_ROOT / ".venv" / "Scripts" / "python.exe")
+    py = _frozen_program()
     vbs_content = (
         "' wechat-claw bridge 用户级自启（向导/管理后台生成）\n"
         "Dim sh\n"
@@ -455,8 +469,7 @@ def _spawn_bridge_now() -> list[dict]:
     """
     if SELFTEST:
         return [{"cmd": "（selftest）将后台启动 bridge（本次运行）", "ok": True, "dry": True}]
-    py = sys.executable if getattr(sys, "frozen", False) \
-        else str(DEPLOY_ROOT / ".venv" / "Scripts" / "python.exe")
+    py = _frozen_program()
     kwargs: dict = {"cwd": str(DEPLOY_ROOT)}
     if os.name == "nt":
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW：无控制台窗口
@@ -581,8 +594,7 @@ def _uac_elevate(on: bool) -> list[dict]:
     bat = DATA_ROOT / f"wechat-claw-autostart-{'on' if on else 'off'}.bat"
     arch = "win64" if sys.maxsize > 2 ** 32 else "win32"
     nssm = RESOURCE_ROOT / "vendor" / "nssm" / f"{arch}.exe"
-    py = sys.executable if getattr(sys, "frozen", False) \
-        else str(DEPLOY_ROOT / ".venv" / "Scripts" / "python.exe")
+    py = _frozen_program()
     if on:
         lines = [
             f'"{nssm}" install wechat-bridge "{py}" -m bridge.main',
