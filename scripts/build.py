@@ -26,8 +26,8 @@ SPEC = ROOT / "scripts" / "wechat-claw.spec"
 VENV_PY = ROOT / ".venv" / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
 
 # GitHub release 镜像（opencode 下载，按优先级轮询，全部失败才报错）
+# ghproxy.com 已失效（200 返回 HTML 错误页）不再收录；假 200 由 BadZipFile 兜底跳过
 _OPENCODE_URLS = [
-    "https://ghproxy.com/https://github.com/anomalyco/opencode/releases/latest/download/opencode-windows-x64.zip",
     "https://github.moeyy.xyz/https://github.com/anomalyco/opencode/releases/latest/download/opencode-windows-x64.zip",
     "https://mirror.ghproxy.com/https://github.com/anomalyco/opencode/releases/latest/download/opencode-windows-x64.zip",
     "https://github.com/anomalyco/opencode/releases/latest/download/opencode-windows-x64.zip",
@@ -44,6 +44,44 @@ def ensure_pyinstaller() -> None:
             sys.exit("[build] PyInstaller 安装失败")
 
 
+def _fetch(url: str, connect_budget: int = 20, total_budget: int = 300) -> bytes:
+    """下载 URL 全量内容，分阶段预算（与 web/handlers/opencode_setup.py 同方案）。
+
+    DNS 挂起不受 urlopen timeout 控制（失效镜像单源可拖数分钟）——
+    连接期 Event 短预算 + 下载期总预算，超时弃源换下一个。
+    """
+    import threading
+    import urllib.request
+    connected = threading.Event()
+    result: dict = {}
+
+    def _worker() -> None:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "wechat-claw-build"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                connected.set()
+                chunks: list[bytes] = []
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                result["data"] = b"".join(chunks)
+        except Exception as e:  # noqa: BLE001
+            result["err"] = e
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    if not connected.wait(connect_budget):
+        raise TimeoutError(f"{connect_budget}s 内未建立连接（DNS/网络挂起）")
+    t.join(total_budget - connect_budget)
+    if t.is_alive():
+        raise TimeoutError(f"下载超总预算 {total_budget}s")
+    if "err" in result:
+        raise result["err"]
+    return result["data"]
+
+
 def _download_opencode() -> bool:
     """下载 opencode-windows-x64.zip 并解压到 vendor/opencode/opencode.exe。"""
     import io
@@ -55,15 +93,14 @@ def _download_opencode() -> bool:
     if sys.platform != "win32":
         print("[build] 非 Windows 平台，跳过 opencode 下载")
         return False
-    import urllib.request
     oc_parent = oc.parent
     oc_parent.mkdir(parents=True, exist_ok=True)
     for url in _OPENCODE_URLS:
         try:
             print(f"[build] 下载 opencode: {url}")
-            req = urllib.request.Request(url, headers={"User-Agent": "wechat-claw-build"})
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                data = resp.read()
+            data = _fetch(url)
+            if data[:2] != b"PK":  # 镜像假 200（HTML 错误页）快速跳过
+                raise ValueError("返回内容非 zip（镜像失效）")
             z = zipfile.ZipFile(io.BytesIO(data))
             for name in z.namelist():
                 if "opencode.exe" in name or "opencode" in name.lower() and not name.endswith("/"):
