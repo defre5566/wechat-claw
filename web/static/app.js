@@ -479,9 +479,11 @@ function renderWizard() {
     ocHideProgress();
     markDone(1);
   }
-  function ocMissing() {
-    ocArea(`<div class="check-row fail"><b>!</b><span>未检测到 opencode</span><small>点击「自动安装 opencode」由系统后台安装</small></div>`);
-    const btn = $("#ocInstall"); if (btn) { btn.textContent = "自动安装 opencode"; btn.disabled = false; }
+  function ocMissing(bundled) {
+    ocArea(bundled
+      ? `<div class="check-row fail"><b>!</b><span>发现捆绑的 opencode，尚未部署</span><small>点击「安装 opencode」部署到数据根 bin/ 目录</small></div>`
+      : `<div class="check-row fail"><b>!</b><span>未检测到 opencode</span><small>点击「安装 opencode」自动下载安装</small></div>`);
+    const btn = $("#ocInstall"); if (btn) { btn.textContent = "安装 opencode"; btn.disabled = false; }
     ocHideProgress();
   }
   function ocHideProgress() {
@@ -494,7 +496,7 @@ function renderWizard() {
     ocArea(`<div class="check-row"><b>…</b><span>正在检测 opencode…</span></div>`);
     ocPost("/api/opencode/detect").then(d => {
       if (d.already) { ocInstalled(d.version); cb && cb(true); }
-      else if (d.missing) { ocMissing(); cb && cb(false); }
+      else if (d.missing) { ocMissing(d.bundled); cb && cb(false); }
       else { ocArea(`<div class="check-row fail"><b>!</b><span>${esc(d.error || "检测失败")}</span></div>`); cb && cb(false); }
     }).catch(e => { ocArea(`<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`); cb && cb(false); });
   }
@@ -514,7 +516,7 @@ function renderWizard() {
           clearInterval(ocPollTimer);
           const b2 = $("#ocBar"); if (b2) b2.style.width = "100%";
           if (d.ok) ocDetectWithRetry(5);
-          else { const b = $("#ocInstall"); if (b) { b.textContent = "自动安装 opencode"; b.disabled = false; } ocArea(`<div class="check-row fail"><b>!</b><span>安装失败，可重试</span></div>`); }
+          else { const b = $("#ocInstall"); if (b) { b.textContent = "安装 opencode"; b.disabled = false; } ocArea(`<div class="check-row fail"><b>!</b><span>安装失败，可重试</span></div>`); }
         }
       }).catch(() => {});
     }, 1500);
@@ -551,8 +553,10 @@ function renderWizard() {
     const btn = $("#ocInstall"); btn.disabled = true; btn.textContent = "准备安装…";
     ocPost("/api/opencode/install").then(d => {
       if (d.already) { ocInstalled(d.version); return; }
+      // 有捆绑 → 后端同步部署完成，直接带版本返回，无需轮询/重试
+      if (d.installed) { ocInstalled(d.version); return; }
       ocPollStart();
-    }).catch(e => { btn.disabled = false; btn.textContent = "自动安装 opencode"; ocArea(`<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`); });
+    }).catch(e => { btn.disabled = false; btn.textContent = "安装 opencode"; ocArea(`<div class="check-row fail"><b>!</b><span>${esc(e.message)}</span></div>`); });
   }
 
   /* ---- 扫码登录（第五步） ---- */
@@ -597,7 +601,7 @@ function renderWizard() {
         <div class="modal-log" id="ocLog" style="margin-top:10px"></div>
       </div>
       <div class="wizard-actions">
-        <button class="btn btn-primary" id="ocInstall">自动安装 opencode</button>
+        <button class="btn btn-primary" id="ocInstall">安装 opencode</button>
         <button class="btn btn-secondary" id="ocRedetect">重新检测</button>
       </div>` : "";
     const asmPanel = current === 2 ? `

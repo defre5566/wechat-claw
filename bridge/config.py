@@ -219,8 +219,9 @@ def xdg_env() -> dict:
 def resolve_opencode() -> str | None:
     """opencode 可执行文件解析（job 登记/单元生成与主链路 acp.command 同源寻址）。
 
-    优先级：acp.command 显式配置（绝对路径校验，无效即失败）→ PATH → 官方默认
-    安装目录 ~/.opencode/bin。找不到返回 None（调用方明确报错并回滚）。
+    优先级：acp.command 显式配置（绝对路径校验，无效即失败）→ PATH → 本系统部署
+    目录 <数据根>/bin（向导安装目标，按平台文件名）→ 官方默认 ~/.opencode/bin。
+    找不到返回 None（调用方明确报错并回滚）。
     """
     cmd = str(get("acp.command") or "").strip()
     if cmd and ("/" in cmd or "\\" in cmd):
@@ -231,9 +232,13 @@ def resolve_opencode() -> str | None:
     found = _shutil.which(cmd or "opencode")
     if found:
         return found
-    fallback = Path.home() / ".opencode" / "bin" / "opencode"
-    if fallback.is_file() and _os.access(fallback, _os.X_OK):
-        return str(fallback)
+    # 按平台候选名（Windows zip 解压后可能带/不带 .exe）
+    names = ("opencode.exe", "opencode") if _os.name == "nt" else ("opencode",)
+    for base in (WORK_ROOT / "bin", Path.home() / ".opencode" / "bin"):
+        for name in names:
+            p = base / name
+            if p.is_file() and _os.access(p, _os.X_OK):
+                return str(p)
     return None
 
 
