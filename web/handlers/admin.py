@@ -608,9 +608,29 @@ def modules_toggle(app, body: dict | None = None) -> dict:
     name = body.get("name", "")
     enabled = bool(body.get("enabled"))
     from modules.register import set_enabled
-    if set_enabled(name, enabled):
-        return {"ok": True}
-    return {"ok": False, "error": f"模块 {name} 不存在或操作失败"}, 400
+    if not set_enabled(name, enabled):
+        return {"ok": False, "error": f"模块 {name} 不存在或操作失败"}, 400
+    # 写信号文件通知 bridge：重生成 AGENTS.md + 清 session + 发提示
+    # 累积列表模式：10 秒内开/关多个模块 → bridge 一次处理，不重复清 session
+    try:
+        import json as _json
+        from datetime import datetime
+        from bridge.config import DATA_ROOT
+        signal = DATA_ROOT / ".config" / ".agents-reload-requested"
+        signal.parent.mkdir(parents=True, exist_ok=True)
+        entries = []
+        if signal.is_file():
+            try:
+                data = _json.loads(signal.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    entries = data
+            except Exception:
+                pass
+        entries.append({"module": name, "enabled": enabled, "at": datetime.now().isoformat(timespec="seconds")})
+        signal.write_text(_json.dumps(entries, ensure_ascii=False) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 def modules_install(app, body: dict | None = None) -> dict:

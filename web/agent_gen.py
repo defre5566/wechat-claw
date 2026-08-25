@@ -87,6 +87,28 @@ def undo_rules() -> list[str]:
     return prev if isinstance(prev, list) else get_rules()
 
 
+# ---------- 模块操作指引（enabled 模块的 agents.md 全文拼接） ----------
+
+def _module_content() -> str:
+    """读 enabled 模块的 agents.md 全文，拼接为模块操作指引段。
+
+    build_index 只含 enabled=true 的模块；停用模块的 agents.md 不进 AGENTS.md，
+    agent 自然不知道它的存在——不会被尝试调用。
+    """
+    from modules.registry_index import build_index
+    from bridge.config import MODULES_ROOT
+
+    index = build_index()
+    parts = []
+    for name in sorted(index.keys()):
+        agents_md = MODULES_ROOT / name / "agents.md"
+        if not agents_md.is_file():
+            continue
+        content = agents_md.read_text(encoding="utf-8").strip()
+        parts.append(f"### {name}\n\n{content}")
+    return "\n\n".join(parts) if parts else "（无启用模块）"
+
+
 # ---------- 生成 ----------
 
 def render(fields: dict) -> str:
@@ -106,5 +128,6 @@ def write_agents() -> Path:
     """读字段 → 渲染 → 覆盖项目根 AGENTS.md；返回输出路径。"""
     fields = get_identity()
     fields["rules"] = get_rules()
+    fields["modules"] = _module_content()
     OUTPUT.write_text(render(fields), encoding="utf-8")
     return OUTPUT

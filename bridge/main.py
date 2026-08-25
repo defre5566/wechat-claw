@@ -370,6 +370,60 @@ class BridgeCore:
             log.error(f"[inbound] {name} spawn 失败: {e}")
             return 2, ""
 
+    async def _check_agents_reload(self) -> None:
+        """后台任务：检测模块启停信号 → 重生成 AGENTS.md + 清 session + 提示最新会话。
+
+        web admin / register CLI 启停模块时写累积列表信号文件 → 本任务检测到
+        → 调 write_agents 重生成 AGENTS.md（插入/移除模块 agents.md）+ 清 _sessions
+        （下次消息 new_session 读最新 AGENTS.md）+ 给最新会话发合并提示。
+        累积列表模式：10 秒内开/关多个模块 → 一次处理，不重复清 session。
+        """
+        from .config import DATA_ROOT
+        signal_file = DATA_ROOT / ".config" / ".agents-reload-requested"
+        while True:
+            await asyncio.sleep(10)
+            try:
+                if not signal_file.is_file():
+                    continue
+                import json as _json
+                entries = _json.loads(signal_file.read_text(encoding="utf-8"))
+                if not isinstance(entries, list):
+                    entries = [entries]
+                signal_file.unlink(missing_ok=True)
+                # 重生成 AGENTS.md（插入/移除启停模块的 agents.md 内容）
+                try:
+                    from web.agent_gen import write_agents
+                    write_agents()
+                except Exception as e:
+                    log.warning(f"[agents-reload] AGENTS.md 重生成失败: {e}")
+                # 清 session 缓存：下次消息 new_session 读最新 AGENTS.md
+                self._agent.clear_sessions()
+                # 合并所有条目成一条提示
+                parts = []
+                for entry in entries:
+                    name = entry.get("module", "?")
+                    enabled = bool(entry.get("enabled"))
+                    emoji = "✅" if enabled else "🔴"
+                    action = "已启用" if enabled else "已关闭"
+                    parts.append(f"{emoji} {name} 模块{action}")
+                tip = "；".join(parts) + "，新功能将在新对话中生效"
+                # 给最新会话发提示（单用户系统，取 timestamp 最大的）
+                latest_conv = None
+                latest_ts = 0.0
+                for conv_id, ts in self.sessions._last_active.items():
+                    if ts > latest_ts:
+                        latest_ts = ts
+                        latest_conv = conv_id
+                if latest_conv:
+                    try:
+                        await self.send_text(latest_conv, tip)
+                    except Exception as e:
+                        log.warning(f"[agents-reload] 提示发送失败: {e}")
+                names = "、".join(e.get("module", "?") for e in entries)
+                log.info(f"[agents-reload] {names}：AGENTS.md 已重载，session 已清，已通知最新会话")
+            except Exception as e:
+                log.warning(f"[agents-reload] 检查异常: {e}")
+
     async def run(self) -> None:
         from .state import load_or_create_token, load_retry_queue
 
@@ -406,6 +460,7 @@ class BridgeCore:
         spawn_task(self.push_worker(), "push_worker")
         spawn_task(self.retry_worker(), "retry_worker")
         spawn_task(scheduler(), "scheduler")
+        spawn_task(self._check_agents_reload(), "agents_reload")
         from .state import TOKEN_FILE
         log.info(
             f"[push] HTTP 入口 http://{PUSH_HOST}:{PUSH_PORT}/push"

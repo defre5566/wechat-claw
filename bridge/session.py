@@ -199,6 +199,16 @@ class ConfirmAcpAgent(AcpAgent):
         )
         log.info("[acp] Connection initialized (wechat-confirm mode)")
 
+    def clear_sessions(self) -> None:
+        """清空会话缓存（不杀进程）：下次 chat() 时 new_session → 读最新 AGENTS.md。
+
+        仅清 session 映射（conversation↔session），不清 response/flush 缓存
+        （防正在处理中的消息丢失中间结果）。模块启停后由 _check_agents_reload 调用。
+        """
+        self._sessions.clear()
+        self._active_conversations.clear()
+        log.info("[acp] Sessions cleared (next message creates new session with latest AGENTS.md)")
+
 
 class SessionManager:
     """5h 会话窗管理：同号 5h 内延续，超时归档并开新会话。"""

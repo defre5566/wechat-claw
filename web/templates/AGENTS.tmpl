@@ -29,7 +29,14 @@
 - 文件发送遵循三级规则：default 直发 / gate 微信确认（30s 无回复拒绝）/ reject 硬拒
 - 敏感路径不写入日志与推送内容
 
+## 模块操作指引
+
+以下为各启用模块的操作手册。遇到模块相关任务时，按对应模块的指引用 write/edit 操作数据文件，不要委派子代理探索。
+
+{{modules}}
+
 ## 其余部分
 
-- 模块业务规范：读取 modules/*/module.json，只加载 enabled: true 的模块，
-  按其规范读取 modules/<name>/agents.md
+- 遇到不确定的模块操作，先读对应模块的 agents.md 再动手
+- 模块调度由 worker 自动运行，agent 不调 worker
+- 模块数据格式见各模块 agents.md；共享数据在 modules/common/shared/

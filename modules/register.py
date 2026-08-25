@@ -461,7 +461,28 @@ def main(argv: list[str] | None = None) -> int:
     if argv[0] in ("--enable", "--disable") and len(argv) >= 2:
         name = argv[1]
         if set_enabled(name, argv[0] == "--enable"):
-            print(f"[register] {name} 已{'启用' if argv[0] == '--enable' else '关闭'}")
+            # 写信号文件通知 bridge：重生成 AGENTS.md + 清 session + 发提示
+            # 累积列表模式：10 秒内开/关多个模块 → bridge 一次处理，不重复清 session
+            try:
+                import json as _json
+                from datetime import datetime
+                from bridge.config import DATA_ROOT
+                signal = DATA_ROOT / ".config" / ".agents-reload-requested"
+                signal.parent.mkdir(parents=True, exist_ok=True)
+                entries = []
+                if signal.is_file():
+                    try:
+                        data = _json.loads(signal.read_text(encoding="utf-8"))
+                        if isinstance(data, list):
+                            entries = data
+                    except Exception:
+                        pass
+                entries.append({"module": name, "enabled": argv[0] == "--enable",
+                                 "at": datetime.now().isoformat(timespec="seconds")})
+                signal.write_text(_json.dumps(entries, ensure_ascii=False) + "\n", encoding="utf-8")
+            except Exception:
+                pass
+            print(f"[register] {name} 已{'启用' if argv[0] == '--enable' else '关闭'}（AGENTS.md 将在 ~10 秒内重载）")
             return 0
         print(f"[register] 模块不存在: {name}")
         return 1
