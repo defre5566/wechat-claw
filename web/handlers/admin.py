@@ -813,7 +813,7 @@ def version_get(app, body: dict | None = None) -> dict:
             "https://api.github.com/repos/defre5566/wechat-claw/releases/latest",
             headers={"User-Agent": "wc-version", "Accept": "application/vnd.github+json"},
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             latest = (data.get("tag_name") or "").lstrip("v")
             assets = data.get("assets") or []

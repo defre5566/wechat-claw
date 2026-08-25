@@ -175,14 +175,13 @@ function modules() {
 }
 
 async function loadData() {
-  const [profile, modules, sources, weather, autostart, status, version] = await Promise.all([
+  const [profile, modules, sources, weather, autostart, status] = await Promise.all([
     api.get("/api/profile"),
     api.get("/api/admin/modules"),
     api.get("/api/admin/sources"),
     api.get("/api/admin/weather").catch(() => null),
     api.get("/api/admin/autostart").catch(() => null),
     api.get("/api/admin/status").catch(() => null),
-    api.get("/api/admin/version").catch(() => null),
   ]);
   state.profile = profile;
   state.modules = modules.modules || [];
@@ -193,9 +192,9 @@ async function loadData() {
     state.autostart = autostart.mode !== "none";
   }
   if (status?.ok) state.serviceStatus = status;
-  if (version?.ok) state.version = version;
   clearTimeout(state.statusTimer);
   state.statusTimer = setTimeout(async () => { try { const s = await api.get("/api/admin/status"); if (s?.ok) { state.serviceStatus = s; if (state.page === "settings") render(); } } catch (e) { /* 静默 */ } }, 15000);
+  api.get("/api/admin/version").then(v => { if (v?.ok) { state.version = v; render(); } }).catch(() => null);
 }
 
 async function pollAutostart(attempts = 10) {
