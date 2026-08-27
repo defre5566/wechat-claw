@@ -380,7 +380,7 @@ function openModuleSettings(name) {
         const opts = (f.options || []).map(o => `<option value="${esc(o.value)}" ${String(val) === String(o.value) ? "selected" : ""}>${esc(o.label || o.value)}</option>`).join("");
         input = `<select data-key="${esc(f.key)}" data-type="select">${opts}</select>`;
       } else if (f.type === "boolean") {
-        input = `<select data-key="${esc(f.key)}" data-type="boolean"><option value="true" ${val === true || val === "true" ? "selected" : ""}>开启</option><option value="false" ${val === false || val === "" || val === "false" ? "selected" : ""}>关闭</option></select>`;
+        input = `<input type="checkbox" data-key="${esc(f.key)}" data-type="boolean" ${val === true || val === "true" ? "checked" : ""}>`;
       } else if (f.type === "tags") {
         input = `<textarea data-key="${esc(f.key)}" data-type="tags" rows="4">${esc(Array.isArray(val) ? val.join("\n") : String(val))}</textarea>`;
       } else { // string / path 等文本输入
@@ -401,12 +401,14 @@ function openModuleSettings(name) {
         if (!cond || Object.keys(cond).length === 0) { el.style.display = ""; return; }
         const ok = Object.entries(cond).every(([k, v]) => {
           const src = node.querySelector(`[data-key="${k}"]`);
-          return src && String(src.value) === String(v);
+          if (!src) return false;
+          const sv = src.dataset.type === "boolean" ? String(src.checked) : String(src.value);
+          return sv === String(v);
         });
         el.style.display = ok ? "" : "none";
       });
     };
-    $$("[data-type='select']", node).forEach(s => s.addEventListener("change", applyShowWhen));
+    $$("[data-type='select'], [data-type='boolean']", node).forEach(s => s.addEventListener("change", applyShowWhen));
     applyShowWhen();
     $("[data-module-save]", node).onclick = async () => {
       const settings = {};
@@ -414,7 +416,7 @@ function openModuleSettings(name) {
         const holder = x.closest("[data-show-when]");
         if (holder && holder.style.display === "none") return;  // 隐藏字段不提交
         const t = x.dataset.type;
-        if (t === "boolean") settings[x.dataset.key] = x.value === "true";
+        if (t === "boolean") settings[x.dataset.key] = x.checked;
         else if (t === "tags") settings[x.dataset.key] = x.value.split("\n").map(s => s.trim()).filter(Boolean);
         else settings[x.dataset.key] = x.value;
       });
