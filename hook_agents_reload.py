@@ -2,7 +2,7 @@
 """wechat-claw-dist 模块启停 → AGENTS.md 重载闭环测试。
 
 隔离运行：所有数据在 /tmp/wc-test/ 下，不碰实际环境。
-用法：cd <dist根目录> && .venv/bin/python test_agents_reload.py
+用法：cd <dist根目录> && .venv/bin/python hook_agents_reload.py
 """
 import json
 import os
