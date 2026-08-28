@@ -292,10 +292,14 @@ class BridgeCore:
             # B：入站路由——模块订阅优先（接管则不再进 agent）
             if await self._route_inbound(conversation_id, text):
                 return
-            # 硬索引拼接（甲路径）：命中位置表 → 材料随消息进主链路（未命中 = 空串原样）
-            from .indexer import build_material_block
+            # 硬索引 → 模糊兜底（≤6字跳过；to_thread 防阻塞事件循环）→ 档位阶梯增量
+            from .indexer import build_material_block, fuzzy_match, tier_increment
             material = build_material_block(text)
-            prompt = text + material if material else text
+            if not material:
+                hits = await asyncio.to_thread(fuzzy_match, text)
+                material = build_material_block(text, hits=hits) if hits else ""
+            increment = tier_increment(conversation_id, text)
+            prompt = text + increment + material
             await self._transport.send_typing(conversation_id, start=True, context_token=self._last_token.get(conversation_id, ""))
             reply = await self._agent.chat(ChatRequest(conversation_id=conversation_id, text=prompt))
             out = reply.text if hasattr(reply, "text") else str(reply)

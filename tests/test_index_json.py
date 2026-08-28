@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import types
 
 
 # ---------- validate_index ----------
@@ -232,3 +233,120 @@ def test_handle_injects_material_into_prompt(tmp_path, monkeypatch):
     asyncio.run(core.handle("wx-1", "提醒我取快递"))
     assert "提醒我取快递" in captured["text"]
     assert "[参考材料·todo]" in captured["text"]  # 材料已随 prompt 注入
+
+
+# ---------- 批次 Ⅲ：fuzzy_match / 档位阶梯 ----------
+
+def _fuzzy_env(tmp_path, monkeypatch, files=None, index=None, stdout="NONE", cfg=None):
+    import bridge.config as cfgmod
+    import bridge.indexer as idx
+    import web.agent_gen as ag
+    _seed_index_dir(tmp_path, monkeypatch, files or {}, index or {})
+    monkeypatch.setattr(cfgmod, "resolve_opencode", lambda: "/usr/bin/opencode")
+    monkeypatch.setattr(cfgmod, "xdg_env", lambda: {})
+    monkeypatch.setattr(cfgmod, "get",
+                        lambda k, d=None: cfg if cfg is not None else "test/model")
+    monkeypatch.setattr(idx.subprocess, "run",
+                        lambda *a, **k: types.SimpleNamespace(stdout=stdout, stderr=""))
+    return idx
+
+
+def test_fuzzy_skips_short_and_disabled(tmp_path, monkeypatch):
+    idx = _fuzzy_env(tmp_path, monkeypatch, cfg=True)
+    assert idx.fuzzy_match("测试测试") == []            # 4 字 < 6：跳过（不碰进程）
+    idx = _fuzzy_env(tmp_path, monkeypatch, cfg=False)  # 显式关闭
+    assert idx.fuzzy_match("帮我查一下最近的快递取件安排") == []
+
+
+def test_fuzzy_parses_ids_with_hallucination_guard(tmp_path, monkeypatch):
+    from bridge.indexer import fuzzy_match
+    _fuzzy_env(
+        tmp_path, monkeypatch,
+        files={"modules/todo/agents.md": "A", "modules/mem/x.md": "B"},
+        index={
+            "todo.json": {"module": "todo", "entries": [{"kw": ["提醒"], "file": "modules/todo/agents.md", "title": "t1"}]},
+            "memory.json": {"module": "memory", "entries": [{"kw": ["快递"], "file": "modules/mem/x.md", "title": "t2"}]},
+        },
+        stdout="编造号 99 与有效 2\n2",  # 99 越界丢弃；2 命中
+        cfg="test/model",
+    )
+    hits = fuzzy_match("我之前说过快递要放驿站还是前台呢")
+    # glob 序：memory.json < todo.json → 编号 2 = todo（条目顺序以实际清单为准）
+    assert len(hits) == 1 and hits[0]["file"] == "modules/todo/agents.md"
+
+
+def test_fuzzy_none_and_timeout(tmp_path, monkeypatch):
+    import subprocess as sp
+    idx = _fuzzy_env(tmp_path, monkeypatch, stdout="NONE", cfg="test/model",
+                     files={"modules/todo/agents.md": "A"},
+                     index={"todo.json": {"module": "todo", "entries": [
+                         {"kw": ["提醒"], "file": "modules/todo/agents.md", "title": "t"}]}})
+    assert idx.fuzzy_match("今天天气怎么样啊朋友们") == []
+    # 超时退化
+    def boom(*a, **k):
+        raise sp.TimeoutExpired(cmd="opencode", timeout=30)
+    idx.subprocess.run = boom
+    assert idx.fuzzy_match("今天天气怎么样啊朋友们") == []
+
+
+def test_tier_delta_prefix_truncation(tmp_path, monkeypatch):
+    from bridge.indexer import _tier_delta
+    import web.agent_gen as ag
+    ins = tmp_path / "instructions"
+    ins.mkdir()
+    (ins / "tier0.md").write_text("第一\n", encoding="utf-8")
+    (ins / "tier1.md").write_text("第一\n第二\n", encoding="utf-8")
+    (ins / "tier3.md").write_text("第一\n第二\n第三\n第四\n", encoding="utf-8")
+    monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", ins)
+    assert _tier_delta(0, 1) == ["第二"]
+    assert _tier_delta(2, 3) == ["第四"]
+    assert _tier_delta(3, 3) == []
+
+
+def test_tier_increment_ladder_and_reset(tmp_path, monkeypatch):
+    from bridge.indexer import _DEPTH, tier_increment
+    import bridge.indexer as idx
+    import web.agent_gen as ag
+    ins = tmp_path / "instructions"
+    ins.mkdir()
+    lines = ["一", "二", "三", "四", "五"]
+    for i in range(5):
+        (ins / f"tier{i}.md").write_text("\n".join(lines[:i + 1]) + "\n", encoding="utf-8")
+    monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", ins)
+    monkeypatch.setattr(idx, "OBSERVE_FILE", tmp_path / "none.jsonl")  # 无画像 → base 0
+    _DEPTH.clear()
+
+    # 前 5 条：无升档
+    for _ in range(5):
+        assert tier_increment("wx-1", "短消息") == ""
+    # 第 6 条：msgs=6//6=1 → 升 tier1，增量=第二行
+    out = tier_increment("wx-1", "随便聊聊")
+    assert out == "\n\n[人设补充]\n二\n"
+    assert _DEPTH["wx-1"]["cur"] == 1
+    # 字数驱动：累计 1200 字 → steps=2 → 升 tier2
+    tier_increment("wx-1", "字" * 600)
+    assert _DEPTH["wx-1"]["cur"] == 1  # 600//600=1，msgs 并列取大仍 1 → 未再升
+    tier_increment("wx-1", "字" * 600)
+    assert _DEPTH["wx-1"]["cur"] == 2
+    # 封顶：巨量文本后不超 tier4
+    for _ in range(40):
+        tier_increment("wx-1", "字" * 600)
+    assert _DEPTH["wx-1"]["cur"] == 4
+
+
+def test_refresh_current_tier_resets_depth(tmp_path, monkeypatch):
+    from bridge.indexer import _DEPTH, refresh_current_tier, tier_increment
+    import bridge.indexer as idx
+    import web.agent_gen as ag
+    ins = tmp_path / "instructions"
+    ins.mkdir()
+    (ins / "tier0.md").write_text("一\n", encoding="utf-8")
+    (ins / "tier1.md").write_text("一\n二\n", encoding="utf-8")
+    monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", ins)
+    monkeypatch.setattr(idx, "OBSERVE_FILE", tmp_path / "none.jsonl")
+    _DEPTH.clear()
+    for _ in range(7):
+        tier_increment("wx-9", "消息")
+    assert _DEPTH["wx-9"]["cur"] == 1
+    refresh_current_tier("wx-9")          # 归档/重载 → 阶梯归零
+    assert "wx-9" not in _DEPTH

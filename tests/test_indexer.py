@@ -133,8 +133,8 @@ def test_profile_tier_from_jsonl(tmp_path, monkeypatch):
     monkeypatch.setattr(idx, "OBSERVE_FILE", f)
     assert idx._profile_tier("wx-1") == 4
     assert idx._profile_tier("wx-2") == 0
-    assert idx._profile_tier("wx-none") == 2  # 无记录默认档
-    assert idx._profile_tier(None) == 2
+    assert idx._profile_tier("wx-none") == 0  # 无记录 → L0 起步（260827 第七章）
+    assert idx._profile_tier(None) == 0
 
 
 def test_refresh_current_tier_writes_profile_tier(tmp_path, monkeypatch):
@@ -160,9 +160,9 @@ def test_refresh_current_tier_keeps_old_on_failure(tmp_path, monkeypatch, caplog
     ins.mkdir()
     (ins / "tier-current.md").write_text("旧装配", encoding="utf-8")  # 只有 current，无 tierN 源
     monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", ins)
-    monkeypatch.setattr(idx, "OBSERVE_FILE", tmp_path / "missing.jsonl")  # 无画像→默认档2→源缺失
+    monkeypatch.setattr(idx, "OBSERVE_FILE", tmp_path / "missing.jsonl")  # 无画像→L0→源缺失
 
-    assert idx.refresh_current_tier("wx-1") == 2
+    assert idx.refresh_current_tier("wx-1") == 0
     assert (ins / "tier-current.md").read_text(encoding="utf-8") == "旧装配"
     assert any("装配失败" in r.message for r in caplog.records)
 

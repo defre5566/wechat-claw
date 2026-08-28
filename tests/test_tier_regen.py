@@ -17,7 +17,7 @@ def test_ensure_builtins_copies_baseline_and_current(tmp_path, monkeypatch):
         assert len([ln for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip()]) == i + 1
     assert (tmp_path / "tier-current.md").is_file()
     assert (tmp_path / "tier-current.md").read_text(encoding="utf-8") == (
-        tmp_path / "tier2.md"
+        tmp_path / "tier0.md"
     ).read_text(encoding="utf-8")
 
 
@@ -81,7 +81,7 @@ def test_regenerate_tiers_commits_on_valid(tmp_path, monkeypatch):
     for i in range(5):
         assert (tmp_path / "instructions" / f"tier{i}.md").is_file()
     assert (tmp_path / "instructions" / "tier-current.md").read_text(encoding="utf-8") == (
-        tmp_path / "instructions" / "tier2.md"
+        tmp_path / "instructions" / "tier0.md"
     ).read_text(encoding="utf-8")
 
 

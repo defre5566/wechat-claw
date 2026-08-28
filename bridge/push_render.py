@@ -67,13 +67,16 @@ def render_push_text(text: str, model: str | None = None) -> str | None:
     if not binary:
         log.warning("[push-render] 未找到 opencode 可执行文件，回退原文")
         return None
-    mdl = model or str(get_cfg("acp.model") or "deepseek/deepseek-chat")
     prompt = RENDER_PROMPT.format(tier0=_load_tier0(), text=text.strip())
+    mdl = model or str(get_cfg("acp.model") or "")
+    argv = [str(binary), "run"]
+    if mdl:
+        argv += ["-m", mdl]
+    argv.append(prompt)
     env = {**os.environ, **xdg_env()}
     try:
         r = subprocess.run(
-            [str(binary), "run", "-m", mdl, prompt],
-            capture_output=True, text=True, timeout=RENDER_TIMEOUT,
+            argv, capture_output=True, text=True, timeout=RENDER_TIMEOUT,
             cwd=str(WORK_ROOT), env=env, creationflags=no_window_flags(),
         )
     except subprocess.TimeoutExpired:

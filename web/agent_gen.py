@@ -38,9 +38,9 @@ INDEX_DIR = INSTRUCTIONS_DIR / "index"
 
 # 出厂 tier 基线文件（tier0~4，装载条数 = 级别 + 1）
 TIER_FILES = [f"tier{i}.md" for i in range(5)]
-# 当前档位兜底：无画像时默认 tier2（标准档）
+# 当前档位兜底：无画像时 L0 起步（260827 第七章定案）
 CURRENT_TIER = "tier-current.md"
-DEFAULT_TIER = "tier2.md"
+DEFAULT_TIER = "tier0.md"
 
 # 中立默认人设（= 出厂 tier 基线的字段值，未填字段时使用）
 DEFAULTS: dict = {
