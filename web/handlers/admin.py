@@ -296,7 +296,9 @@ def optimize_persona(app, body: dict | None = None) -> dict:
     binary = resolve_opencode()
     if not binary:
         return {"ok": False, "error": "未找到 opencode 可执行文件（acp.command / PATH / ~/.opencode/bin）"}, 400
-    model = str(get_cfg("acp.model") or "deepseek/deepseek-chat")
+    # 模型：config acp.model；未配置则不带 -m（用 opencode 部署默认模型，
+    # 不落 fallback 常量——deepseek 教训：无凭据环境静默失败）
+    model = str(get_cfg("acp.model") or "").strip()
     ident = agent_gen.get_identity()
     prompt = _PERSONA_OPT_TEMPLATE.format(
         address=str(ident.get("address") or ""),
@@ -310,9 +312,13 @@ def optimize_persona(app, body: dict | None = None) -> dict:
     env = os.environ.copy()
     env.update(xdg_env())
     try:
-        # cwd=数据根（=项目根）：opencode run 在此加载 AGENTS.md/opencode.jsonc，
+        # cwd=数据根（=项目根）：opencode run 在此加载 opencode.jsonc，
         # 否则进程继承 web 启动目录导致上下文错位
-        r = subprocess.run([binary, "run", "-m", model, prompt],
+        argv = [binary, "run"]
+        if model:
+            argv += ["-m", model]
+        argv.append(prompt)
+        r = subprocess.run(argv,
                            capture_output=True, text=True, timeout=120, env=env,
                            cwd=str(WORK_ROOT),
                            creationflags=no_window_flags())

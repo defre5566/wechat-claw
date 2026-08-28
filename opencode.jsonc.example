@@ -9,8 +9,9 @@
   // 默认免费模型（零 API key 开箱即用）；自定义模型可改为 "provider/model" 形式
   "model": "opencode/mimo-v2.5-free",
 
-  // 全索引装载：仅指向索引与当前档位文件，指引正文按需读，永不内联（部署生成时写入）
-  // "instructions": ["instructions/index-modules.md", "instructions/tier-current.md"],
+  // 全索引装载：人设当前档位（tier-current 由 ensure_builtins/索引器保证存在）；
+  // 指引正文不进 system，bridge 硬索引命中后按需拼接
+  "instructions": ["instructions/tier-current.md"],
 
   "permission": {
     // 项目外目录访问：默认放开家目录（读个人文档/发送文件需要）；可收窄为具体目录，如 "~/文档/**": "allow"

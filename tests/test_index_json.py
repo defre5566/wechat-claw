@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import types
+from pathlib import Path
 
 
 # ---------- validate_index ----------
@@ -350,3 +351,99 @@ def test_refresh_current_tier_resets_depth(tmp_path, monkeypatch):
     assert _DEPTH["wx-9"]["cur"] == 1
     refresh_current_tier("wx-9")          # 归档/重载 → 阶梯归零
     assert "wx-9" not in _DEPTH
+
+
+# ---------- 批次 Ⅳ：模型解析统一 / config_gen 接线 / 启动自查 ----------
+
+def test_regenerate_tiers_without_model_omits_flag(tmp_path, monkeypatch):
+    """config 无 acp.model → staging jsonc 不含 model 键 + argv 不带 -m。"""
+    import web.agent_gen as ag
+    import bridge.config as cfg
+
+    seen = {}
+    real_replace = __import__("os").replace
+
+    def fake_run(argv, **k):
+        seen["argv"] = argv
+        seen["jsonc"] = (Path(k["cwd"]) / "opencode.jsonc").read_text(encoding="utf-8")
+        out = Path(k["cwd"]) / "instructions"
+        out.mkdir(exist_ok=True)
+        for i in range(5):
+            (out / f"tier{i}.md").write_text(
+                "\n".join(f"条目{j}" for j in range(i + 1)), encoding="utf-8")
+        return types.SimpleNamespace(stdout="OK", stderr="")
+
+    ins = tmp_path / "instructions"
+    monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", ins)
+    monkeypatch.setattr(ag.subprocess, "run", fake_run)
+    monkeypatch.setattr(cfg, "resolve_opencode", lambda: "/usr/bin/opencode")
+    monkeypatch.setattr(cfg, "xdg_env", lambda: {})
+    monkeypatch.setattr(cfg, "get", lambda k, d=None: None)  # acp.model 未配置
+
+    assert ag.regenerate_tiers(
+        identity={"address": "鑫", "assistant_name": "鱼", "role": "r", "language": "l"},
+        rules=["守则"],
+    )
+    assert "-m" not in seen["argv"]                          # 不带 -m
+    assert '"model"' not in seen["jsonc"]                    # staging jsonc 省 model 键
+
+
+def test_config_gen_wires_instructions(tmp_path, monkeypatch):
+    """向导④生成：数据根 jsonc 含 instructions 真实字段 + tier-current 已落盘。"""
+    import json as _json
+    import web.handlers.config_gen as cg
+    import web.agent_gen as ag
+    import bridge.config as bc
+
+    monkeypatch.setattr(cg, "OPCODE_CONFIG", tmp_path / "opencode.jsonc")
+    monkeypatch.setattr(cg, "DATA_ROOT", tmp_path)
+    monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", tmp_path / "instructions")
+    monkeypatch.setattr(bc, "DATA_ROOT", tmp_path)
+
+    class _App:
+        steps = {}
+        def _h(self, *a, **k):
+            pass
+    # 依赖的 _gen_config/_gen_key 等落 tmp：monkeypatch 掉非本测关注项
+    monkeypatch.setattr(cg, "_gen_config", lambda: {"ok": True})
+    monkeypatch.setattr(cg, "_gen_key", lambda: {"ok": True})
+    monkeypatch.setattr(cg, "_gen_trust_notice", lambda: {"ok": True})
+    monkeypatch.setattr(cg.auth, "password_exists", lambda: True)
+
+    cg.handle(_App(), {})
+    text = (tmp_path / "opencode.jsonc").read_text(encoding="utf-8")
+    assert '"instructions"' in text and "tier-current.md" in text
+    assert (tmp_path / "instructions" / "tier-current.md").is_file()
+
+
+def test_bridge_startup_warns_on_missing_instructions(tmp_path, monkeypatch, caplog):
+    """启动自查：数据根 jsonc 缺 instructions → warning；有 → 不告警；无 jsonc → 静默。"""
+    import logging
+    import bridge.main as m
+
+    core = m.BridgeCore.__new__(m.BridgeCore)
+
+    # 缺 instructions
+    cfg_a = tmp_path / "a"
+    cfg_a.mkdir()
+    (cfg_a / "opencode.jsonc").write_text('{\n  "model": "x"\n}\n', encoding="utf-8")
+    monkeypatch.setattr(m, "WORKDIR", cfg_a)
+    with caplog.at_level(logging.WARNING, logger="wechat-bridge"):
+        core._check_instructions_wiring()
+    assert any("缺 instructions" in r.message for r in caplog.records)
+
+    # 已接线
+    caplog.clear()
+    cfg_b = tmp_path / "b"
+    cfg_b.mkdir()
+    (cfg_b / "opencode.jsonc").write_text(
+        '{\n  "instructions": ["instructions/tier-current.md"]\n}\n', encoding="utf-8")
+    monkeypatch.setattr(m, "WORKDIR", cfg_b)
+    core._check_instructions_wiring()
+    assert not any("缺 instructions" in r.message for r in caplog.records)
+
+    # 无 jsonc（未配置形态）→ 静默
+    caplog.clear()
+    monkeypatch.setattr(m, "WORKDIR", tmp_path / "empty")
+    core._check_instructions_wiring()
+    assert not any("缺 instructions" in r.message for r in caplog.records)

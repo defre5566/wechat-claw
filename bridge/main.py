@@ -444,10 +444,35 @@ class BridgeCore:
             except Exception as e:
                 log.warning(f"[agents-reload] 检查异常: {e}")
 
+    def _check_instructions_wiring(self) -> None:
+        """启动自查（存量部署）：数据根 opencode.jsonc 缺 instructions → 人设档位
+        不会被装载（tier-current 成死文件）。仅告警不改文件——修复属于配置决策
+        （手动补行或重跑向导④），避免静默覆盖用户配置。"""
+        try:
+            import json as _json
+            cfg_file = WORKDIR / "opencode.jsonc"
+            if not cfg_file.is_file():
+                return  # 未配置形态（不放置也能运行），不提示
+            text = cfg_file.read_text(encoding="utf-8")
+            # jsonc 带注释，粗查键名字面即可（防误报不追求完整解析）
+            stripped = "\n".join(
+                ln.split("//")[0] for ln in text.splitlines() if ln.strip()
+            )
+            if '"instructions"' not in stripped:
+                log.warning(
+                    "[config] opencode.jsonc 缺 instructions 数组——人设档位"
+                    "（instructions/tier-current.md）不会被装载。请在该文件中补："
+                    '"instructions": ["instructions/tier-current.md"]，'
+                    "或重跑向导④（新部署不受影响）"
+                )
+        except Exception as e:  # noqa: BLE001 自查失败不阻塞启动
+            log.warning(f"[config] instructions 接线自查失败: {e}")
+
     async def run(self) -> None:
         from .state import load_or_create_token, load_retry_queue
 
         WORKDIR.mkdir(parents=True, exist_ok=True)
+        self._check_instructions_wiring()
 
         self._transport = WeChatTransport(account_id="default")
         # 复用已保存登录态（SDK 公共接口 restore_token，vendor 补丁⑧注入——不摸私有成员）

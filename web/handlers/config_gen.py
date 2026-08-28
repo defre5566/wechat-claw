@@ -97,6 +97,13 @@ def _gen_trust_notice() -> dict:
 
 def handle(app, body: dict | None = None) -> dict:
     body = body or {}
+    # instructions 指向的文件必须存在（tier-current/tier 基线/index 目录）——
+    # ④步集中落盘，与 opencode.jsonc 生成同批完成
+    try:
+        from web.agent_gen import ensure_builtins
+        ensure_builtins()
+    except Exception:  # noqa: BLE001 初始化失败不阻塞配置生成（bridge reload 会再兜底）
+        pass
     results = {"config": _gen_config(), "key": _gen_key(),
                "opencode": _gen_opencode_config(),
                "trust_notice": _gen_trust_notice()}

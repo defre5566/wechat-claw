@@ -213,14 +213,26 @@ def regenerate_tiers(identity: dict | None = None, rules: list[str] | None = Non
     staging = Path(tempfile.mkdtemp(prefix="wc-tiers-"))
     try:
         (staging / "instructions").mkdir()
-        model = str(get_cfg("acp.model") or "deepseek/deepseek-chat")
-        (staging / "opencode.jsonc").write_text(
-            STAGING_MODEL_MIN_JSONC.format(model=model), encoding="utf-8"
-        )
+        # 模型：config acp.model > 省略（staging jsonc 不写 model 键，继承 opencode
+        # 默认解析链）；不落任何 fallback 常量（deepseek 教训：无凭据环境静默失败）
+        model = str(get_cfg("acp.model") or "").strip()
+        if model:
+            (staging / "opencode.jsonc").write_text(
+                STAGING_MODEL_MIN_JSONC.format(model=model), encoding="utf-8"
+            )
+        else:
+            (staging / "opencode.jsonc").write_text(
+                '{\n  "permission": { "read": { "**": "allow" }, "edit": { "**": "allow" } }\n}\n',
+                encoding="utf-8",
+            )
         env = {**os.environ, **xdg_env()}
         try:
+            argv = [str(binary), "run"]
+            if model:
+                argv += ["-m", model]
+            argv.append(prompt)
             r = subprocess.run(
-                [str(binary), "run", "-m", model, prompt],
+                argv,
                 capture_output=True, text=True, timeout=TIER_RUN_TIMEOUT,
                 cwd=str(staging), env=env, creationflags=no_window_flags(),
             )
