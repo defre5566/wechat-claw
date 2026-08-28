@@ -92,8 +92,8 @@ EOF
 
 | 文件 | 作用 |
 |---|---|
-| [AGENTS.md](AGENTS.md) | 对话 agent 系统提示（管理后台"助理人设"经 web/templates/AGENTS.tmpl + agent_gen.py 生成；仓库内为默认模板） |
-| [opencode.jsonc.example](opencode.jsonc.example) | 对话 agent **权限配置**（deny 五项 token/密钥），复制为项目根 `opencode.jsonc` 生效 |
+| [AGENTS.md](AGENTS.md) | 开发环境说明（面向本仓 opencode 开发会话；部署态 agent 指引经 instructions 目录装载，不使用 AGENTS.md） |
+| [opencode.jsonc.example](opencode.jsonc.example) | 对话 agent **权限配置模板**（deny 六项 token/密钥；部署时由向导生成为数据根 `opencode.jsonc` 并追加 instructions 指向） |
 
 ### 4. 守护进程
 

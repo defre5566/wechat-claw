@@ -26,7 +26,7 @@ MAX_PUSH_BODY = get("push.max_body_mb") * 1024 * 1024  # 超限 413
 
 # 推送类型（与模块契约保持一致）
 PUSH_DIRECT_TYPES = {"briefing", "notification", "text", "file"}  # 原文发送（file 发文件原件）
-PUSH_AGENT_TYPES = {"reminder", "alert"}                          # 进 agent 队列加工后发送
+PUSH_AGENT_TYPES = {"reminder", "alert"}                          # 单轮渲染加工后发送（不入会话）
 
 
 def _token_valid(token: str, push_token: str) -> bool:

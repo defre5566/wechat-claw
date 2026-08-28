@@ -218,7 +218,7 @@ def main() -> int:
             try:
                 subprocess.run(
                     [str(PY), "-c",
-                     "import sys; sys.path.insert(0, r'%s'); import web.agent_gen as a; a.write_agents()" % str(ROOT)],
+                     "import sys; sys.path.insert(0, r'%s'); import web.agent_gen as a; a.ensure_builtins()" % str(ROOT)],
                     cwd=str(ROOT), env=env, capture_output=True, timeout=30,
                 )
             except Exception:

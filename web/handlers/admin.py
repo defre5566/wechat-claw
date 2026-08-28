@@ -112,6 +112,7 @@ def _save_lifestyle(value: str) -> bool:
 
 def profile_set(app, body: dict | None = None) -> dict:
     body = body or {}
+    identity_changed = "identity" in body or "rules" in body
     if "city" in body:
         set_city(str(body["city"]))
     if "habits" in body:
@@ -122,6 +123,9 @@ def profile_set(app, body: dict | None = None) -> dict:
         agent_gen.set_rules([str(r) for r in body["rules"]])
     if "lifestyle" in body:
         _save_lifestyle(str(body.get("lifestyle", "")))
+    if identity_changed:
+        # 人设变更 → 后台重建 tier 分档文件（不阻塞响应；校验不过保留旧文件）
+        agent_gen.regenerate_tiers_async()
     return {"ok": True}
 
 
@@ -236,7 +240,7 @@ def profile_undo(app, body: dict | None = None) -> dict:
 
 
 def agents_render(app, body: dict | None = None) -> dict:
-    out = agent_gen.write_agents()
+    out = agent_gen.ensure_builtins()
     return {"ok": True, "file": str(out)}
 
 

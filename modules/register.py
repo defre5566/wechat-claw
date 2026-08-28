@@ -340,9 +340,46 @@ def set_enabled(name: str, enabled: bool) -> bool:
         if not enabled:
             from bridge.jobs import unregister_jobs
             unregister_jobs(name)  # 停用 → 注销该模块全部 agent job（无声明无副作用）
+            sync_index_on_disable(name)  # 检索域：索引文件失效（.off 保留）
+        else:
+            sync_index_on_enable(name)   # 检索域：放置/恢复索引文件
         from modules.registry_index import invalidate
         invalidate()
     return ok
+
+
+# ---------- 指令索引插拔（260827 议题1：settings 管调度域，index 文件管检索域） ----------
+
+def sync_index_on_enable(name: str) -> None:
+    """启用：放置/恢复模块索引文件（机制在 web.agent_gen.place_index）。"""
+    try:
+        from web.agent_gen import place_index
+        place_index(name)
+    except Exception as e:  # noqa: BLE001 索引放置失败不阻塞启用
+        print(f"[register] {name} 索引放置失败: {e}")
+
+
+def sync_index_on_disable(name: str) -> None:
+    """关闭：索引文件加 .off 失效（保留 worker/用户态，再启用即恢复）。"""
+    try:
+        from web.agent_gen import INDEX_DIR
+        live = INDEX_DIR / f"{name}.json"
+        off = INDEX_DIR / f"{name}.json.off"
+        if live.is_file():
+            live.replace(off)
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] {name} 索引失效失败: {e}")
+
+
+def sync_index_on_uninstall(name: str) -> None:
+    """卸载：移除索引文件（含 .off 残留）；幂等。"""
+    try:
+        from web.agent_gen import INDEX_DIR
+        for f in (INDEX_DIR / f"{name}.json", INDEX_DIR / f"{name}.json.off"):
+            if f.is_file():
+                f.unlink()
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] {name} 索引移除失败: {e}")
 
 
 def get_module(name: str) -> dict | None:
@@ -414,6 +451,7 @@ def uninstall(name: str, keep_data: bool = True) -> bool:
         refresh_permissions()  # 卸载后撤销该模块豁免
         from bridge.jobs import unregister_jobs
         unregister_jobs(name)  # 卸载 → 注销该模块 agent job（无声明无副作用）
+        sync_index_on_uninstall(name)  # 检索域：移除索引文件（含 .off 残留）
         from modules.registry_index import invalidate
         invalidate()
         return True

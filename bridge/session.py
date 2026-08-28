@@ -249,6 +249,9 @@ class SessionManager:
             self._last_active.pop(conversation_id, None)  # 归档会话不再是推送目标
             self._last_active[conversation_id] = now
             self._save()
+            # 冷启动装配（乙）：新会话首条消息前按画像刷新当前档位文件
+            from .indexer import refresh_current_tier
+            refresh_current_tier(conversation_id)
             return "expired"
         self._last_active[conversation_id] = now
         self._save()

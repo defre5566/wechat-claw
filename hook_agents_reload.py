@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""wechat-claw-dist 模块启停 → AGENTS.md 重载闭环测试。
+"""wechat-claw-dist 模块启停 → instructions 索引重载闭环测试。
 
 隔离运行：所有数据在 /tmp/wc-test/ 下，不碰实际环境。
 用法：cd <dist根目录> && .venv/bin/python hook_agents_reload.py
@@ -78,9 +78,9 @@ def simulate_bridge_reload():
     from modules.registry_index import invalidate
     invalidate()
 
-    from web.agent_gen import write_agents
-    path = write_agents()
-    text = path.read_text()
+    # 兜底基建（tier 基线 / index 目录；索引文件生命周期归 register 钩子）
+    from web.agent_gen import ensure_builtins
+    ensure_builtins()
 
     parts = []
     for e in entries:
@@ -88,24 +88,27 @@ def simulate_bridge_reload():
         action = "已启用" if e["enabled"] else "已关闭"
         parts.append(f"{emoji} {e['module']} 模块{action}")
     tip = "；".join(parts) + "，新功能将在新对话中生效"
-    return text, tip
+    return entries, tip
 
 
 print("=" * 60)
-print("测试 1：安装单个模块 → write_agents 生成 AGENTS.md")
+print("测试 1：安装单个模块 → register 钩子放置索引文件")
 print("=" * 60)
 install_test_module("todo", "# todo 模块 · agent 维护指引\n\n记任务时写 tasks/月.json\n")
 write_signal([{"module": "todo", "enabled": True, "at": "2026-08-25T19:00:00"}])
-text, tip = simulate_bridge_reload()
-check("AGENTS.md 已生成", text is not None)
-check("含模块操作指引段", "## 模块操作指引" in text)
-check("todo agents.md 全文已插入", "todo 模块 · agent 维护指引" in text)
-check("无未替换占位", "{{" not in text)
+entries, tip = simulate_bridge_reload()
+from modules.register import sync_index_on_enable, sync_index_on_disable
+idx_file = TEST_DIR / "instructions" / "index" / "todo.json"
+sync_index_on_enable("todo")
+check("index/todo.json 已放置", idx_file.is_file())
+data = json.loads(idx_file.read_text())
+check("骨架单条目指向 agents.md", data["entries"][0]["file"] == "modules/todo/agents.md")
+check("agents.md 全文未内联进索引", "记任务时写" not in idx_file.read_text())
 check("提示内容正确", tip is not None and "todo" in tip and "已启用" in tip)
 
 print()
 print("=" * 60)
-print("测试 2：累积列表——一次开两个模块 → 合并成一条提示")
+print("测试 2：累积列表——一次开两个模块 → 合并成一条提示 + 双索引文件")
 print("=" * 60)
 sig = TEST_DIR / ".config" / ".agents-reload-requested"
 if sig.exists():
@@ -113,22 +116,28 @@ if sig.exists():
 write_signal([{"module": "todo", "enabled": True, "at": "2026-08-25T19:00:00"}])
 write_signal([{"module": "Planner", "enabled": True, "at": "2026-08-25T19:00:05"}])
 install_test_module("Planner", "# Planner 模块 · agent 维护指引\n\n记纪念日写 countdown.json\n")
-text, tip = simulate_bridge_reload()
+entries, tip = simulate_bridge_reload()
+sync_index_on_enable("Planner")
+planner_file = TEST_DIR / "instructions" / "index" / "Planner.json"
 check("信号含两条记录", "todo" in tip and "Planner" in tip)
 check("合并成一条提示", tip.count("新功能将在新对话中生效") == 1)
-check("AGENTS.md 含两个模块", "todo 模块" in text and "Planner 模块" in text)
+check("双索引文件在位", idx_file.is_file() and planner_file.is_file())
 check("信号文件已删", not sig.exists())
 
 print()
 print("=" * 60)
-print("测试 3：停用模块 → AGENTS.md 不再含该模块")
+print("测试 3：停用模块 → 索引文件失效（.off 保留，再启用恢复）")
 print("=" * 60)
 write_signal([{"module": "todo", "enabled": False, "at": "2026-08-25T19:01:00"}])
 install_test_module("todo", "# todo 模块 · agent 维护指引\n", enabled=False)
-text, tip = simulate_bridge_reload()
+entries, tip = simulate_bridge_reload()
+sync_index_on_disable("todo")
+off_file = TEST_DIR / "instructions" / "index" / "todo.json.off"
 check("提示含停用", "todo" in tip and "已关闭" in tip)
-check("AGENTS.md 不再含 todo", "todo 模块 · agent 维护指引" not in text)
-check("AGENTS.md 仍含 Planner", "Planner 模块" in text)
+check("索引失效（.off 保留）", not idx_file.exists() and off_file.is_file())
+check("Planner 索引仍在位", planner_file.is_file())
+sync_index_on_enable("todo")
+check("再启用即恢复", idx_file.is_file() and not off_file.exists())
 
 print()
 print("=" * 60)

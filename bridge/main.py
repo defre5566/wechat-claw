@@ -4,7 +4,8 @@
 架构: 微信 ← iLink Bot API ← wechat-agent-sdk transport ← opencode acp
 特性:
 - 5h 会话窗（同号延续，超时按时间戳归档；归档会话不再是推送目标）
-- 按会话串行（同会话内一次一条，多会话并行；消息与 agent 推送共享 per-conv 锁）
+- 按会话串行（同会话内一次一条，多会话并行，per-conv 锁仅入站消息使用；
+  agent 类推送走独立单轮渲染，不占会话锁、不入会话历史）
 - 高危操作"微信确认"：opencode 权限 ask → 发微信问用户 → 回复"允许"/"拒绝"决定
 - 主动推送：HTTP 入口（127.0.0.1:9898/push）→ 队列 → 分流 direct/file/agent
 - 通用调度引擎：读 registry index 按 module.json 规则触发模块
@@ -211,16 +212,23 @@ class BridgeCore:
         return " ".join(notes)
 
     async def _agent_process(self, text: str) -> None:
-        """agent 类推送：取 agent 加工后发送到目标会话。
+        """agent 类推送：单轮无工具渲染为带人设的播报文本后发送（不进任何会话）。
 
-        会话窗接入：目标会话已过期 → 归档并刷新活跃点，推送内容作为新会话首条
-        上下文（附提示），用户后续回复可直接接续（不再误报"超时开新会话"）。
+        渲染走独立一次性进程（push_render，无会话/无历史），与入站消息的
+        per-conv 锁零交集——切断"推送加工写入会话历史"的上下文雪球正反馈；
+        渲染失败回退原文直发。
+        会话窗接入保留：目标会话已过期 → 归档并刷新活跃点，用户回复可直接接续。
         """
+        from .push_render import render_push_text
         from .state import target_conversation_ids
         convs = target_conversation_ids()
         if not convs:
             log.warning("[push] 无目标 conversation_id，跳过")
             return
+        rendered = await asyncio.to_thread(render_push_text, text)
+        out = rendered or text
+        if rendered is None:
+            log.warning("[push] 渲染失败，回退原文直发")
         for conv in convs:
             try:
                 expired = self.sessions.check(conv) == "expired"
@@ -228,20 +236,13 @@ class BridgeCore:
                     await self.send_text(
                         conv, "（上一轮会话已超时归档，本轮推送已开启新会话，可直接回复继续）"
                     )
-                async with self._conv_locks.setdefault(conv, asyncio.Lock()):
-                    reply = await self._agent.chat(ChatRequest(conversation_id=conv, text=text))
-                    out = reply.text if hasattr(reply, "text") else str(reply)
-                    if not out:
-                        log.warning("[push] agent 返回空，兜底发原文")
-                        await self.send_with_retry(conv, text)
-                        continue
-                    await self.send_with_retry(conv, out)
+                await self.send_with_retry(conv, out)
             except Exception as e:
-                log.error(f"[push] agent 加工失败: {e}")
+                log.error(f"[push] 发送失败: {e}")
 
     async def push_worker(self) -> None:
-        """消费外部推送：direct 走发送串行锁（防微信限流）；agent 按会话并行（per-conv
-        锁防同会话交叉），不再占用全局锁阻塞其他会话的入站消息；file 类不占串行区。
+        """消费外部推送：direct 走发送串行锁（防微信限流）；agent 类独立单轮渲染
+        （不占 per-conv 锁、不入会话，失败回退原文）；file 类不占串行区。
         """
         while True:
             item = await self.push_queue.get()
@@ -291,8 +292,12 @@ class BridgeCore:
             # B：入站路由——模块订阅优先（接管则不再进 agent）
             if await self._route_inbound(conversation_id, text):
                 return
+            # 硬索引拼接（甲路径）：命中位置表 → 材料随消息进主链路（未命中 = 空串原样）
+            from .indexer import build_material_block
+            material = build_material_block(text)
+            prompt = text + material if material else text
             await self._transport.send_typing(conversation_id, start=True, context_token=self._last_token.get(conversation_id, ""))
-            reply = await self._agent.chat(ChatRequest(conversation_id=conversation_id, text=text))
+            reply = await self._agent.chat(ChatRequest(conversation_id=conversation_id, text=prompt))
             out = reply.text if hasattr(reply, "text") else str(reply)
             if out:
                 await self.send_text(conversation_id, out)  # 走 _last_token（与 send_with_retry 一致）
@@ -312,6 +317,7 @@ class BridgeCore:
         多模块竞争：priority 高者先试，接管即止（定稿语义）。
         """
         from modules.registry_index import build_index
+        from .indexer import observe
         index = build_index()
         candidates: list[tuple[int, str, str]] = []
         for name, cfg in index.items():
@@ -324,19 +330,24 @@ class BridgeCore:
                     candidates.append((int(ib.get("priority", 0)), name, intent))
                     break
         if not candidates:
+            observe(text, routed=False, conversation_id=conversation_id)
             return False
         candidates.sort(key=lambda x: -x[0])  # 高 priority 先试
+        names = [name for _pri, name, _intent in candidates]
         for _pri, name, intent in candidates:
             rc, out = await self._run_inbound(name, conversation_id, text)
             if rc == 0:
                 if out:
                     await self.send_text(conversation_id, out)
                 log.info(f"[inbound] {name} 接管消息（intent={intent!r}）")
+                observe(text, modules_hit=names, routed=True, conversation_id=conversation_id)
                 return True
             if rc == 3:
                 log.info(f"[inbound] {name} 转 agent（intent={intent!r}）")
+                observe(text, modules_hit=names, routed=False, conversation_id=conversation_id)
                 return False
             log.warning(f"[inbound] {name} 处理失败 rc={rc}（降级 agent）")
+            observe(text, modules_hit=names, routed=False, conversation_id=conversation_id)
             return False  # 失败即降级，不连续试多模块
         return False
 
@@ -371,11 +382,12 @@ class BridgeCore:
             return 2, ""
 
     async def _check_agents_reload(self) -> None:
-        """后台任务：检测模块启停信号 → 重生成 AGENTS.md + 清 session + 提示最新会话。
+        """后台任务：检测模块启停信号 → 兜底基建 + 清 session + 提示最新会话。
 
         web admin / register CLI 启停模块时写累积列表信号文件 → 本任务检测到
-        → 调 write_agents 重生成 AGENTS.md（插入/移除模块 agents.md）+ 清 _sessions
-        （下次消息 new_session 读最新 AGENTS.md）+ 给最新会话发合并提示。
+        → ensure_builtins 兜底（tier 基线 / index 目录；索引文件生命周期由
+        register 钩子管理）+ 清 _sessions（下次消息 new_session 读最新 instructions）
+        + 给最新会话发合并提示。
         累积列表模式：10 秒内开/关多个模块 → 一次处理，不重复清 session。
         """
         from .config import DATA_ROOT
@@ -390,14 +402,18 @@ class BridgeCore:
                 if not isinstance(entries, list):
                     entries = [entries]
                 signal_file.unlink(missing_ok=True)
-                # 重生成 AGENTS.md（插入/移除启停模块的 agents.md 内容）
+                # 兜底基建（tier 基线/index 目录；索引文件由 register 钩子管理）
                 try:
-                    from web.agent_gen import write_agents
-                    write_agents()
+                    from web.agent_gen import ensure_builtins
+                    ensure_builtins()
                 except Exception as e:
-                    log.warning(f"[agents-reload] AGENTS.md 重生成失败: {e}")
-                # 清 session 缓存：下次消息 new_session 读最新 AGENTS.md
+                    log.warning(f"[agents-reload] instructions 兜底失败: {e}")
+                # 清 session 缓存：下次消息 new_session 读最新 instructions
                 self._agent.clear_sessions()
+                # 冷启动装配（乙）：全部活跃会话按各自画像刷新当前档位文件
+                from .indexer import refresh_current_tier
+                for conv_id in list(self.sessions._last_active):
+                    refresh_current_tier(conv_id)
                 # 合并所有条目成一条提示
                 parts = []
                 for entry in entries:
@@ -420,7 +436,7 @@ class BridgeCore:
                     except Exception as e:
                         log.warning(f"[agents-reload] 提示发送失败: {e}")
                 names = "、".join(e.get("module", "?") for e in entries)
-                log.info(f"[agents-reload] {names}：AGENTS.md 已重载，session 已清，已通知最新会话")
+                log.info(f"[agents-reload] {names}：instructions 已就绪，session 已清，已通知最新会话")
             except Exception as e:
                 log.warning(f"[agents-reload] 检查异常: {e}")
 

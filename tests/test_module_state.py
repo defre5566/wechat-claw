@@ -26,6 +26,10 @@ def _mk(tmp: Path, module_json: dict | None = None):
     mp = pytest.MonkeyPatch()
     mp.setattr(register, "MODULES_DIR", tmp / "modules")
     mp.setattr(register, "DATA_ROOT", tmp / "modules" / "modules_data")
+    # 启停钩子会写指令索引目录（register → web.agent_gen），一并隔离防泄漏真实数据根
+    import web.agent_gen as ag
+    mp.setattr(ag, "INDEX_DIR", tmp / "instructions" / "index")
+    mp.setattr(ag, "DATA_ROOT", tmp)
     return mod_dir, data_dir, mp
 
 
