@@ -356,22 +356,22 @@ def test_refresh_current_tier_resets_depth(tmp_path, monkeypatch):
 # ---------- 批次 Ⅳ：模型解析统一 / config_gen 接线 / 启动自查 ----------
 
 def test_regenerate_tiers_without_model_omits_flag(tmp_path, monkeypatch):
-    """config 无 acp.model → staging jsonc 不含 model 键 + argv 不带 -m。"""
+    """config 无 acp.model → argv 不带 -m，并使用只读纯净 agent。"""
     import web.agent_gen as ag
     import bridge.config as cfg
 
     seen = {}
-    real_replace = __import__("os").replace
-
     def fake_run(argv, **k):
         seen["argv"] = argv
-        seen["jsonc"] = (Path(k["cwd"]) / "opencode.jsonc").read_text(encoding="utf-8")
-        out = Path(k["cwd"]) / "instructions"
-        out.mkdir(exist_ok=True)
-        for i in range(5):
-            (out / f"tier{i}.md").write_text(
-                "\n".join(f"条目{j}" for j in range(i + 1)), encoding="utf-8")
-        return types.SimpleNamespace(stdout="OK", stderr="")
+        assert "--pure" in argv and "--agent" in argv and "plan" in argv
+        return types.SimpleNamespace(
+            stdout=json.dumps({"type": "text", "part": {"text": "\n\n".join(
+                f"===TIER{i}===\n" + "\n".join(f"条目{j}" for j in range(i + 1))
+                + f"\n===END_TIER{i}===" for i in range(5)
+            )}}) + "\n" + json.dumps({"type": "step_finish", "part": {"reason": "stop"}}),
+            stderr="",
+            returncode=0,
+        )
 
     ins = tmp_path / "instructions"
     monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", ins)
@@ -385,7 +385,6 @@ def test_regenerate_tiers_without_model_omits_flag(tmp_path, monkeypatch):
         rules=["守则"],
     )
     assert "-m" not in seen["argv"]                          # 不带 -m
-    assert '"model"' not in seen["jsonc"]                    # staging jsonc 省 model 键
 
 
 def test_config_gen_wires_instructions(tmp_path, monkeypatch):
@@ -441,6 +440,15 @@ def test_bridge_startup_warns_on_missing_instructions(tmp_path, monkeypatch, cap
     monkeypatch.setattr(m, "WORKDIR", cfg_b)
     core._check_instructions_wiring()
     assert not any("缺 instructions" in r.message for r in caplog.records)
+
+    # 接线存在但 tier 文件缺失/行数错误：分别给出只读告警
+    caplog.clear()
+    (cfg_b / "instructions").mkdir()
+    (cfg_b / "instructions" / "tier-current.md").write_text("当前", encoding="utf-8")
+    (cfg_b / "instructions" / "tier0.md").write_text("一\n二\n", encoding="utf-8")
+    core._check_instructions_wiring()
+    assert any("tier1.md 缺失" in r.message for r in caplog.records)
+    assert any("tier0.md 非空行数=2" in r.message for r in caplog.records)
 
     # 无 jsonc（未配置形态）→ 静默
     caplog.clear()

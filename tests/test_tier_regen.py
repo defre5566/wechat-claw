@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import types
+import json
 from pathlib import Path
 
 
@@ -43,17 +44,62 @@ def test_validate_tiers_ok_and_bad(tmp_path):
     assert not ag._validate_tiers(d)
 
 
-# ---------- regenerate_tiers（staging 隔离 + 原子提交） ----------
+def test_parse_tier_output_strict_protocol():
+    import web.agent_gen as ag
+    good = _protocol_output(_good_files())
+    assert ag._parse_tier_output(good) is not None
+    assert ag._parse_tier_output("解释文字\n" + good) is None
+    assert ag._parse_tier_output(good + "\n额外文字") is None
+    broken = good.replace("条目0\n条目1\n===END_TIER1===", "别的第一条\n条目1\n===END_TIER1===")
+    assert ag._parse_tier_output(broken) is None
 
-def _fake_run_writes(files: dict[str, str]):
-    """返回 fake subprocess.run：在 cwd/instructions 下写 files（缺文件模拟残品）。"""
+
+def test_extract_run_text_reads_jsonl_and_requires_finish():
+    import web.agent_gen as ag
+    stream = "\n".join([
+        '{"type":"step_start"}',
+        '{"type":"text","part":{"text":"甲"}}',
+        '{"type":"text","part":{"text":"乙"}}',
+        '{"type":"step_finish","part":{"reason":"stop"}}',
+    ])
+    assert ag._extract_run_text(stream) == "甲乙"
+    assert ag._extract_run_text(stream.replace(
+        '{"type":"step_finish","part":{"reason":"stop"}}', ""
+    )) is None
+
+
+def test_write_web_log_records_failure(tmp_path, monkeypatch):
+    import web.agent_gen as ag
+    monkeypatch.setattr(ag, "DATA_ROOT", tmp_path)
+    ag._write_web_log("协议校验失败")
+    assert "协议校验失败" in (tmp_path / "logs" / "web.log").read_text(encoding="utf-8")
+
+
+# ---------- regenerate_tiers（stdout 协议 + 原子提交） ----------
+
+def _protocol_output(files: dict[str, str]) -> str:
+    """把 tier 文件内容转换为生成器 stdout 协议。"""
+    blocks = []
+    for i in range(5):
+        name = f"tier{i}.md"
+        if name not in files:
+            continue
+        blocks.append(f"===TIER{i}===\n{files[name]}\n===END_TIER{i}===")
+    return "\n\n".join(blocks)
+
+
+def _fake_run_output(files: dict[str, str], returncode: int = 0):
+    """返回 fake subprocess.run：模型只返回 stdout，不接触任何文件。"""
 
     def fake_run(_argv, **kwargs):
-        out = Path(kwargs["cwd"]) / "instructions"
-        out.mkdir(exist_ok=True)
-        for name, content in files.items():
-            (out / name).write_text(content, encoding="utf-8")
-        return types.SimpleNamespace(stdout="OK", stderr="")
+        return types.SimpleNamespace(
+            stdout=(
+                json.dumps({"type": "text", "part": {"text": _protocol_output(files)}})
+                + "\n"
+                + json.dumps({"type": "step_finish", "part": {"reason": "stop"}})
+            ),
+            stderr="", returncode=returncode
+        )
 
     return fake_run
 
@@ -67,7 +113,7 @@ def _good_files() -> dict[str, str]:
 def test_regenerate_tiers_commits_on_valid(tmp_path, monkeypatch):
     import web.agent_gen as ag
     monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", tmp_path / "instructions")
-    monkeypatch.setattr(ag.subprocess, "run", _fake_run_writes(_good_files()))
+    monkeypatch.setattr(ag.subprocess, "run", _fake_run_output(_good_files()))
     monkeypatch.setattr(ag, "resolve_opencode", lambda: "/usr/bin/opencode", raising=False)
     import bridge.config as cfg
     monkeypatch.setattr(cfg, "resolve_opencode", lambda: "/usr/bin/opencode")
@@ -93,7 +139,7 @@ def test_regenerate_tiers_keeps_old_on_invalid(tmp_path, monkeypatch):
     monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", ins)
     bad = _good_files()
     del bad["tier4.md"]  # 残品：缺 tier4
-    monkeypatch.setattr(ag.subprocess, "run", _fake_run_writes(bad))
+    monkeypatch.setattr(ag.subprocess, "run", _fake_run_output(bad))
     monkeypatch.setattr(cfg := __import__("bridge.config", fromlist=["x"]), "resolve_opencode",
                         lambda: "/usr/bin/opencode")
     monkeypatch.setattr(cfg, "xdg_env", lambda: {})
@@ -105,3 +151,66 @@ def test_regenerate_tiers_keeps_old_on_invalid(tmp_path, monkeypatch):
     ) is False
     assert (ins / "tier0.md").read_text(encoding="utf-8") == "旧基线"  # 旧文件原样保留
     assert not (ins / "tier1.md").exists()  # 残品未提交
+
+
+def test_regenerate_restores_model_file_writes(tmp_path, monkeypatch):
+    """即使 opencode 错认目录直接改真实 tier，也恢复六文件且不刷新 current。"""
+    import web.agent_gen as ag
+    import bridge.config as cfg
+    ins = tmp_path / "instructions"
+    ins.mkdir()
+    old = {}
+    for i in range(5):
+        old[f"tier{i}.md"] = f"旧{i}\n"
+        (ins / f"tier{i}.md").write_text(old[f"tier{i}.md"], encoding="utf-8")
+    (ins / "tier-current.md").write_text("旧current\n", encoding="utf-8")
+
+    def fake_run(_argv, **_kwargs):
+        # 复刻部署事故：模型错误地写真实目录，但 stdout 协议无效。
+        (ins / "tier0.md").write_text("越权新内容\n", encoding="utf-8")
+        return types.SimpleNamespace(stdout="OK", stderr="", returncode=0)
+
+    monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", ins)
+    monkeypatch.setattr(ag.subprocess, "run", fake_run)
+    monkeypatch.setattr(cfg, "resolve_opencode", lambda: "/usr/bin/opencode")
+    monkeypatch.setattr(cfg, "xdg_env", lambda: {})
+    monkeypatch.setattr(cfg, "get", lambda *_: "test/model")
+    assert not ag.regenerate_tiers(
+        identity={"address": "鑫", "assistant_name": "鱼", "role": "r", "language": "l"},
+        rules=["守则"],
+    )
+    assert (ins / "tier0.md").read_text(encoding="utf-8") == old["tier0.md"]
+    assert (ins / "tier-current.md").read_text(encoding="utf-8") == "旧current\n"
+
+
+def test_commit_tiers_rolls_back_all_files(tmp_path, monkeypatch):
+    import os
+    import web.agent_gen as ag
+    ins = tmp_path / "instructions"
+    staging = tmp_path / "staging"
+    (staging / "instructions").mkdir(parents=True)
+    monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", ins)
+    ins.mkdir()
+    old = {}
+    for fname in ag.TIER_FILES + [ag.CURRENT_TIER]:
+        old[fname] = f"旧-{fname}\n"
+        (ins / fname).write_text(old[fname], encoding="utf-8")
+    payload = {f"tier{i}": [f"新{j}" for j in range(i + 1)] for i in range(5)}
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def fail_midway(src, dst):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise OSError("commit fail")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(ag.os, "replace", fail_midway)
+    try:
+        ag._commit_tiers(staging, payload)
+    except OSError:
+        pass
+    else:
+        raise AssertionError("expected commit failure")
+    for fname, content in old.items():
+        assert (ins / fname).read_text(encoding="utf-8") == content

@@ -18,10 +18,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
 import threading
+from datetime import datetime
 from pathlib import Path
 
 from bridge.config import DATA_ROOT
@@ -136,7 +138,7 @@ def ensure_builtins() -> Path:
     return INSTRUCTIONS_DIR
 
 
-# ---------- tier 分档生成（web 两框保存 → opencode run 写层级文件） ----------
+# ---------- tier 分档生成（web 两框保存 → opencode run 输出协议） ----------
 
 TIER_PROMPT = """你是 wechat-claw 助理人设编辑器。任务：把用户的朴素输入整理为助理人设的分档规范文件。
 
@@ -148,14 +150,44 @@ TIER_PROMPT = """你是 wechat-claw 助理人设编辑器。任务：把用户�
 行为守则（逐条）：
 {rules}
 
-【写入位置】当前工作目录下的 instructions/ 目录，覆盖以下五个文件：
-tier0.md（1 条）、tier1.md（2 条）、tier2.md（3 条）、tier3.md（4 条）、tier4.md（5 条）
+【输出方式】禁止使用任何工具，禁止读取、创建或修改任何文件。只在最终回答中输出五个分档内容。
+严格使用以下分隔格式，不要输出解释、标题、Markdown 代码块或其他文字：
+
+===TIER0===
+第1条
+===END_TIER0===
+
+===TIER1===
+第1条
+第2条
+===END_TIER1===
+
+===TIER2===
+第1条
+第2条
+第3条
+===END_TIER2===
+
+===TIER3===
+第1条
+第2条
+第3条
+第4条
+===END_TIER3===
+
+===TIER4===
+第1条
+第2条
+第3条
+第4条
+第5条
+===END_TIER4===
 
 【分档逻辑】所有档共用同一条目序列的第 1~N 条：
 先产出一条完整的优先级序列（共 5 条），从最不可少的排到最锦上添花的：
 第 1 条 = 身份核心（谁是谁、如何称呼对方）；其后依次是基础语气、
 常用交互风格、更细的表达偏好、附加加分项。
-然后 tierN.md = 该序列前 N+1 条的原样拷贝，一行一条，不加序号。
+然后 tierN = 该序列前 N+1 条的原样拷贝，一行一条，不加序号。
 
 【条目规范】
 - 每条一句紧凑规范句，≤60 字，直接可作系统提示使用，不解释理由
@@ -163,15 +195,10 @@ tier0.md（1 条）、tier1.md（2 条）、tier2.md（3 条）、tier3.md（4 �
 - 只允许重组用户输入的信息，禁止虚构新的性格细节、经历或能力承诺
 - 输入信息不足以撑满某档时，可用中性的通用措辞补位（如"回应务实简短"），不得编造
 
-【自查】写完五个文件后逐一核对行数是否等于 1/2/3/4/5，不符则修正后收工，
-最后仅回复 "OK"。
+【自查】输出前逐一核对五个区块的行数是否等于 1/2/3/4/5，并核对高档包含低档的全部前缀。
 """
 
 TIER_RUN_TIMEOUT = 120  # 与 admin.optimize_persona 同口径
-STAGING_MODEL_MIN_JSONC = (
-    '{{\n  "model": "{model}",\n'
-    '  "permission": {{ "read": {{ "**": "allow" }}, "edit": {{ "**": "allow" }} }}\n}}\n'
-)
 
 
 def _validate_tiers(d: Path) -> bool:
@@ -189,11 +216,143 @@ def _validate_tiers(d: Path) -> bool:
     return True
 
 
-def regenerate_tiers(identity: dict | None = None, rules: list[str] | None = None) -> bool:
-    """同步执行：opencode run 在 staging 目录生成五档 → 硬校验 → 原子替换正式文件。
+def _parse_tier_output(raw: str) -> dict[str, list[str]] | None:
+    """解析模型 stdout 的五档协议，拒绝缺档、脏文本、越长条目与非前缀分档。"""
+    clean = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", raw or "")
+    result: dict[str, list[str]] = {}
+    cursor = 0
+    for i in range(5):
+        marker = re.match(
+            rf"\s*===TIER{i}===\s*(.*?)\s*===END_TIER{i}===",
+            clean[cursor:],
+            flags=re.DOTALL,
+        )
+        if marker is None:
+            return None
+        lines = [line.strip() for line in marker.group(1).splitlines() if line.strip()]
+        if len(lines) != i + 1 or any(len(line) > 60 for line in lines):
+            return None
+        if any(line.startswith(("#", "-", "*", "```")) for line in lines):
+            return None
+        result[f"tier{i}"] = lines
+        cursor += marker.end()
+    if clean[cursor:].strip():
+        return None
+    for i in range(1, 5):
+        if result[f"tier{i}"][:i] != result[f"tier{i - 1}"]:
+            return None
+    return result
 
-    staging 隔离：模型写临时目录，校验不过则用户现有 tier 文件原样保留；
-    通过后逐文件 os.replace 提交，并把 tier-current 刷新为默认档内容。
+
+def _extract_run_text(raw: str) -> str | None:
+    """从 opencode --format json 的 JSONL 流提取完整回答。
+
+    只收集 type=text 的 part.text，并要求出现 step_finish；CLI 状态行、工具输出和
+    未完成流不进入 tier 协议解析。
+    """
+    parts: list[str] = []
+    finished = False
+    for line in (raw or "").splitlines():
+        try:
+            event = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "text":
+            part = event.get("part")
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                parts.append(part["text"])
+        elif event.get("type") == "step_finish":
+            finished = True
+    text = "".join(parts).strip()
+    return text if finished and text else None
+
+
+def _write_web_log(message: str) -> None:
+    """把 tier 任务状态写入数据根 web.log，避免 stderr 被重定向后丢失。"""
+    try:
+        path = DATA_ROOT / "logs" / "web.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} [tiers] {message}\n")
+    except OSError:
+        pass
+
+
+def _snapshot_tiers() -> dict[str, bytes | None]:
+    """记录正式 tier 六文件，防外部 opencode 进程越权改写真实目录。"""
+    snapshot: dict[str, bytes | None] = {}
+    for fname in TIER_FILES + [CURRENT_TIER]:
+        path = INSTRUCTIONS_DIR / fname
+        try:
+            snapshot[fname] = path.read_bytes() if path.is_file() else None
+        except OSError:
+            snapshot[fname] = None
+    return snapshot
+
+
+def _restore_unexpected_tier_writes(snapshot: dict[str, bytes | None]) -> bool:
+    """恢复 run 期间对正式 tier 的非预期修改；返回是否发现过越权写。"""
+    changed = False
+    INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    for fname, old in snapshot.items():
+        path = INSTRUCTIONS_DIR / fname
+        try:
+            current = path.read_bytes() if path.is_file() else None
+            if current == old:
+                continue
+            changed = True
+            if old is None:
+                path.unlink(missing_ok=True)
+            else:
+                tmp = path.with_suffix(path.suffix + ".restore.tmp")
+                tmp.write_bytes(old)
+                os.replace(tmp, path)
+        except OSError as e:
+            log.error("[tiers] 恢复越权写失败: %s (%s)", path, e)
+    return changed
+
+
+def _commit_tiers(staging: Path, payload: dict[str, list[str]]) -> None:
+    """事务提交 tier0~4 与 tier-current；中途失败恢复提交前的六个文件。"""
+    INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    staged = staging / "instructions"
+    backup = staging / "backup"
+    backup.mkdir()
+    targets = TIER_FILES + [CURRENT_TIER]
+    existed: set[str] = set()
+    for fname in targets:
+        target = INSTRUCTIONS_DIR / fname
+        if target.is_file():
+            shutil.copyfile(target, backup / fname)
+            existed.add(fname)
+    for fname in TIER_FILES:
+        (staged / fname).write_text("\n".join(payload[fname[:-3]]) + "\n", encoding="utf-8")
+    (staged / CURRENT_TIER).write_text(
+        (staged / DEFAULT_TIER).read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    try:
+        for fname in targets:
+            os.replace(staged / fname, INSTRUCTIONS_DIR / fname)
+    except Exception:
+        for fname in targets:
+            target = INSTRUCTIONS_DIR / fname
+            old = backup / fname
+            try:
+                if fname in existed:
+                    os.replace(old, target)
+                elif target.exists():
+                    target.unlink()
+            except OSError:
+                log.error("[tiers] 回滚失败: %s", target)
+        raise
+
+
+def regenerate_tiers(identity: dict | None = None, rules: list[str] | None = None) -> bool:
+    """同步执行：opencode run 输出协议 → Python 校验/写 staging → 事务提交。
+
+    模型不拥有文件工具；正式文件只由本进程在协议校验通过后写入。
     """
     from bridge.config import WORK_ROOT, get as get_cfg, resolve_opencode, xdg_env, no_window_flags
 
@@ -202,7 +361,9 @@ def regenerate_tiers(identity: dict | None = None, rules: list[str] | None = Non
     binary = resolve_opencode()
     if not binary:
         log.warning("[tiers] 未找到 opencode 可执行文件，跳过 tier 重建")
+        _write_web_log("未找到 opencode，可执行文件未生成")
         return False
+    _write_web_log("开始生成")
     prompt = TIER_PROMPT.format(
         address=ident.get("address", ""),
         assistant_name=ident.get("assistant_name", ""),
@@ -211,55 +372,62 @@ def regenerate_tiers(identity: dict | None = None, rules: list[str] | None = Non
         rules="\n".join(f"- {r}" for r in rule_list),
     )
     staging = Path(tempfile.mkdtemp(prefix="wc-tiers-"))
+    before_run = _snapshot_tiers()
     try:
-        (staging / "instructions").mkdir()
-        # 模型：config acp.model > 省略（staging jsonc 不写 model 键，继承 opencode
-        # 默认解析链）；不落任何 fallback 常量（deepseek 教训：无凭据环境静默失败）
+        # 模型：config acp.model > 省略（让 opencode 使用部署配置默认模型）。模型只输出协议文本，
+        # 不获得文件写入任务；正式文件只由 Python 在后续事务中写入。
         model = str(get_cfg("acp.model") or "").strip()
-        if model:
-            (staging / "opencode.jsonc").write_text(
-                STAGING_MODEL_MIN_JSONC.format(model=model), encoding="utf-8"
-            )
-        else:
-            (staging / "opencode.jsonc").write_text(
-                '{\n  "permission": { "read": { "**": "allow" }, "edit": { "**": "allow" } }\n}\n',
-                encoding="utf-8",
-            )
         env = {**os.environ, **xdg_env()}
         try:
-            argv = [str(binary), "run"]
+            argv = [str(binary), "run", "--agent", "plan", "--pure", "--format", "json"]
             if model:
                 argv += ["-m", model]
             argv.append(prompt)
             r = subprocess.run(
                 argv,
                 capture_output=True, text=True, timeout=TIER_RUN_TIMEOUT,
-                cwd=str(staging), env=env, creationflags=no_window_flags(),
+                # cwd 只用于让 opencode 读取现有部署配置；模型没有正式文件写入职责。
+                cwd=str(WORK_ROOT), env=env, creationflags=no_window_flags(),
             )
         except subprocess.TimeoutExpired:
             log.warning("[tiers] tier 生成超时（%ds），保留原文件", TIER_RUN_TIMEOUT)
+            _write_web_log(f"生成超时（{TIER_RUN_TIMEOUT}s），保留原文件")
             return False
         except OSError as e:
             log.warning("[tiers] tier 生成进程异常: %s", e)
+            _write_web_log(f"生成进程异常：{e}，保留原文件")
             return False
-        out_dir = staging / "instructions"
-        if not _validate_tiers(out_dir):
-            log.warning(
-                "[tiers] 产物校验未过（%s），保留原文件；run 输出尾: %s",
-                [f.name for f in out_dir.iterdir()] if out_dir.is_dir() else "无产物",
-                (r.stdout or r.stderr or "")[-120:].strip(),
-            )
+        if _restore_unexpected_tier_writes(before_run):
+            log.warning("[tiers] 检测到 opencode 越权改写正式 tier，已恢复；本次继续仅使用 stdout")
+            _write_web_log("检测到 opencode 越权改写正式 tier，已恢复；仅使用 stdout 产物")
+        if r.returncode != 0:
+            message = f"opencode 返回码 {r.returncode}；run 输出尾: {(r.stdout or r.stderr or '')[-120:].strip()}"
+            log.warning("[tiers] %s，保留原文件", message)
+            _write_web_log(message)
             return False
-        INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
+        run_text = _extract_run_text(r.stdout or "")
+        payload = _parse_tier_output(run_text or "")
+        if payload is None:
+            message = f"JSONL/tier 协议校验失败；run 输出尾: {(r.stdout or r.stderr or '')[-120:].strip()}"
+            log.warning("[tiers] %s，保留原文件", message)
+            _write_web_log(message)
+            return False
+        staged = staging / "instructions"
+        staged.mkdir()
         for fname in TIER_FILES:
-            os.replace(out_dir / fname, INSTRUCTIONS_DIR / fname)
-        # 当前档位文件随新基线刷新（一期无画像，恒为默认档）
-        cur = INSTRUCTIONS_DIR / CURRENT_TIER
-        tmp = cur.with_suffix(".md.tmp")
-        shutil.copyfile(INSTRUCTIONS_DIR / DEFAULT_TIER, tmp)
-        os.replace(tmp, cur)
+            (staged / fname).write_text("\n".join(payload[fname[:-3]]) + "\n", encoding="utf-8")
+        if not _validate_tiers(staged):
+            log.warning("[tiers] Python 产物校验失败，保留原文件")
+            _write_web_log("Python 产物校验失败，保留原文件")
+            return False
+        _commit_tiers(staging, payload)
         log.info("[tiers] 五档 tier 已更新（model=%s）", model)
+        _write_web_log(f"生成成功，model={model or 'opencode-default'}")
         return True
+    except Exception as e:
+        log.warning("[tiers] 提交失败，已尝试回滚：%s", e)
+        _write_web_log(f"提交失败，已尝试回滚：{e}")
+        return False
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 

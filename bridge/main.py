@@ -445,11 +445,8 @@ class BridgeCore:
                 log.warning(f"[agents-reload] 检查异常: {e}")
 
     def _check_instructions_wiring(self) -> None:
-        """启动自查（存量部署）：数据根 opencode.jsonc 缺 instructions → 人设档位
-        不会被装载（tier-current 成死文件）。仅告警不改文件——修复属于配置决策
-        （手动补行或重跑向导④），避免静默覆盖用户配置。"""
+        """启动只读自查：配置接线和 tier 文件缺失时告警，不自动修改用户文件。"""
         try:
-            import json as _json
             cfg_file = WORKDIR / "opencode.jsonc"
             if not cfg_file.is_file():
                 return  # 未配置形态（不放置也能运行），不提示
@@ -465,6 +462,26 @@ class BridgeCore:
                     '"instructions": ["instructions/tier-current.md"]，'
                     "或重跑向导④（新部署不受影响）"
                 )
+                return
+            instructions_dir = WORKDIR / "instructions"
+            current = instructions_dir / "tier-current.md"
+            if not current.is_file():
+                log.warning("[config] instructions/tier-current.md 缺失——冷启动不会装载当前人设")
+            for i in range(5):
+                tier = instructions_dir / f"tier{i}.md"
+                if not tier.is_file():
+                    log.warning("[config] instructions/%s 缺失——tier 人设不完整", tier.name)
+                    continue
+                try:
+                    count = len([line for line in tier.read_text(encoding="utf-8").splitlines() if line.strip()])
+                except OSError as e:
+                    log.warning("[config] 读取 %s 失败：%s", tier, e)
+                    continue
+                if count != i + 1:
+                    log.warning(
+                        "[config] %s 非空行数=%s，应为 %s——tier 人设可能不完整",
+                        tier.name, count, i + 1,
+                    )
         except Exception as e:  # noqa: BLE001 自查失败不阻塞启动
             log.warning(f"[config] instructions 接线自查失败: {e}")
 
