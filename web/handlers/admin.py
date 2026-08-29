@@ -282,6 +282,18 @@ def _extract_sections(output: str) -> dict:
     return {"role": role.strip(), "language": language.strip()}
 
 
+def _log_opencode_persona_failure(message: str) -> None:
+    """记录人设优化失败详情；不把模型错误文本返回给前端字段。"""
+    try:
+        path = DATA_ROOT / "logs" / "web.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        from datetime import datetime
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} [persona] {message}\n")
+    except OSError:
+        pass
+
+
 def optimize_persona(app, body: dict | None = None) -> dict:
     """用 opencode run 优化人设：前端传入表单当前 role/language，返回两段截取结果。"""
     import os
@@ -323,10 +335,22 @@ def optimize_persona(app, body: dict | None = None) -> dict:
                            cwd=str(WORK_ROOT),
                            creationflags=no_window_flags())
     except subprocess.TimeoutExpired:
+        _log_opencode_persona_failure("opencode 优化超时（120 秒）")
         return {"ok": False, "error": "opencode 优化超时（120 秒），请稍后重试"}, 504
-    output = (r.stdout or r.stderr or "").strip()
+    except OSError as e:
+        _log_opencode_persona_failure(f"opencode 优化进程异常：{e}")
+        return {"ok": False, "error": "opencode 优化进程启动失败，请检查配置"}, 502
+    if r.returncode != 0:
+        detail = (r.stderr or r.stdout or "").strip().replace("\n", " ")[-500:]
+        _log_opencode_persona_failure(f"opencode 返回码={r.returncode}，详情={detail}")
+        return {"ok": False, "error": "opencode 优化失败，请检查模型配置或网络连接"}, 502
+    output = (r.stdout or "").strip()
     if not output:
+        _log_opencode_persona_failure("opencode 优化成功但未返回 stdout")
         return {"ok": False, "error": "opencode 未返回任何输出"}, 502
+    if output.startswith("Error:") or "Unexpected server error" in output or "UnknownError" in output:
+        _log_opencode_persona_failure(f"opencode stdout 含错误标记：{output[-500:]}")
+        return {"ok": False, "error": "opencode 优化失败，请检查模型配置或网络连接"}, 502
     sections = _extract_sections(output)
     if not sections["role"] and not sections["language"]:
         return {"ok": True, "role": output, "language": "", "fallback": True}
