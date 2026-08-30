@@ -18,25 +18,25 @@ def test_clean_output_strips_cli_prefix_and_blank():
 
 def test_clean_output_truncates_overlong():
     from bridge.push_render import _clean_output
-    out = _clean_output("x" * 500)
-    assert len(out) == 200 and out.endswith("…")
+    out = _clean_output("x" * 6000)
+    assert len(out) == 5000 and out.endswith("…")
 
 
-# ---------- _load_tier0 ----------
+# ---------- _load_tier ----------
 
-def test_load_tier0_prefers_file(tmp_path, monkeypatch):
+def test_load_tier_prefers_file(tmp_path, monkeypatch):
     import bridge.push_render as pr
     d = tmp_path / "instructions"
     d.mkdir()
-    (d / "tier0.md").write_text("自定义基调。", encoding="utf-8")
+    (d / "tier-current.md").write_text("自定义基调。多行也原样读。", encoding="utf-8")
     monkeypatch.setattr(pr, "WORK_ROOT", tmp_path)
-    assert pr._load_tier0() == "自定义基调。"
+    assert pr._load_tier() == "自定义基调。多行也原样读。"
 
 
-def test_load_tier0_falls_back_builtin(tmp_path, monkeypatch):
+def test_load_tier_falls_back_builtin(tmp_path, monkeypatch):
     import bridge.push_render as pr
     monkeypatch.setattr(pr, "WORK_ROOT", tmp_path)  # 无 instructions 目录
-    assert pr._load_tier0() == pr.FALLBACK_TIER0
+    assert pr._load_tier() == pr.FALLBACK_TIER
 
 
 # ---------- render_push_text 失败路径 ----------
