@@ -77,6 +77,13 @@ def build_index() -> dict:
             enabled = False
         if not enabled:
             continue  # 关闭的模块不调度、不认 token
+        # 兼容门禁兜底（issue #4）：防绕过 register 直改 settings.json 硬启用；
+        # 已启用模块在主程序跨基线更新后变不兼容 → 也在此静止（级别与 token 缺失同款）
+        from bridge.compat import compat_ok
+        ok_c, why_c = compat_ok(data)
+        if not ok_c:
+            log.error(f"[index] 模块 {name} 兼容性校验失败（未加入索引，不调度/不推送）：{why_c}")
+            continue
         th = _token_hash(name)
         if th is None:
             log.error(f"[index] 模块 {name} token 文件缺失（未加入索引，无法调度/推送；可用 register.py --reissue-token {name} 补发）")

@@ -672,8 +672,9 @@ def modules_toggle(app, body: dict | None = None) -> dict:
     name = body.get("name", "")
     enabled = bool(body.get("enabled"))
     from modules.register import set_enabled
-    if not set_enabled(name, enabled):
-        return {"ok": False, "error": f"模块 {name} 不存在或操作失败"}, 400
+    ok, why = set_enabled(name, enabled)
+    if not ok:
+        return {"ok": False, "error": why or f"模块 {name} 不存在或操作失败"}, 400
     # 写信号文件通知 bridge：重生成 AGENTS.md + 清 session + 发提示
     # 累积列表模式：10 秒内开/关多个模块 → bridge 一次处理，不重复清 session
     try:

@@ -21,7 +21,7 @@ def _mk(tmp: Path, module_json: dict | None = None):
     mod_dir.mkdir(parents=True)
     data_dir.mkdir(parents=True)
     (mod_dir / "module.json").write_text(
-        json.dumps(module_json or {"name": "demo"}), encoding="utf-8")
+        json.dumps(module_json or {"name": "demo", "bridge_compat": ["0.1"]}), encoding="utf-8")
     import pytest
     mp = pytest.MonkeyPatch()
     mp.setattr(register, "MODULES_DIR", tmp / "modules")
@@ -37,12 +37,13 @@ def _mk(tmp: Path, module_json: dict | None = None):
 
 def test_set_enabled_writes_settings_json(tmp_path):
     mod_dir, data_dir, _ = _mk(tmp_path)
-    assert register.set_enabled("demo", True)
+    ok, why = register.set_enabled("demo", True)
+    assert ok, why
     mj = json.loads((mod_dir / "module.json").read_text(encoding="utf-8"))
     assert "enabled" not in mj
     sv = json.loads((data_dir / "settings.json").read_text(encoding="utf-8"))
     assert sv["enabled"] is True
-    assert register.set_enabled("demo", False)
+    assert register.set_enabled("demo", False)[0]
     sv = json.loads((data_dir / "settings.json").read_text(encoding="utf-8"))
     assert sv["enabled"] is False
 

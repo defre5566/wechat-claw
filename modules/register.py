@@ -331,10 +331,23 @@ def update_module(
     return ok
 
 
-def set_enabled(name: str, enabled: bool) -> bool:
-    """唯一启停入口：写数据区 settings.json 的 enabled（module.json 不再承载部署状态）。"""
+def set_enabled(name: str, enabled: bool) -> tuple[bool, str]:
+    """唯一启停入口：写数据区 settings.json 的 enabled（module.json 不再承载部署状态）。
+
+    返回 (成功与否, 原因)：不兼容主程序基线时 (False, 原因)，web/CLI 明示给用户。
+    """
     if not module_exists(name):
-        return False
+        return False, f"模块 {name} 不存在"
+    if enabled:
+        # 兼容门禁（issue #4）：module.json 必须声明 bridge_compat 且含当前基线
+        from bridge.compat import compat_ok
+        try:
+            mj = json.loads((MODULES_DIR / name / "module.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            return False, f"module.json 读取失败：{e}"
+        ok, why = compat_ok(mj)
+        if not ok:
+            return False, why
     ok = _merge_settings(name, enabled=bool(enabled))
     if ok:
         if not enabled:
@@ -345,7 +358,7 @@ def set_enabled(name: str, enabled: bool) -> bool:
             sync_index_on_enable(name)   # 检索域：放置/恢复索引文件
         from modules.registry_index import invalidate
         invalidate()
-    return ok
+    return ok, "" if ok else "settings.json 写入失败"
 
 
 # ---------- 指令索引插拔（260827 议题1：settings 管调度域，index 文件管检索域） ----------
@@ -498,7 +511,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv[0] in ("--enable", "--disable") and len(argv) >= 2:
         name = argv[1]
-        if set_enabled(name, argv[0] == "--enable"):
+        ok, why = set_enabled(name, argv[0] == "--enable")
+        if ok:
             # 写信号文件通知 bridge：重生成 AGENTS.md + 清 session + 发提示
             # 累积列表模式：10 秒内开/关多个模块 → bridge 一次处理，不重复清 session
             try:
@@ -520,9 +534,9 @@ def main(argv: list[str] | None = None) -> int:
                 signal.write_text(_json.dumps(entries, ensure_ascii=False) + "\n", encoding="utf-8")
             except Exception:
                 pass
-            print(f"[register] {name} 已{'启用' if argv[0] == '--enable' else '关闭'}（AGENTS.md 将在 ~10 秒内重载）")
+            print(f"[register] {name} 已{'启用' if argv[0] == '--enable' else '关闭'}（instructions 将在 ~10 秒内重载）")
             return 0
-        print(f"[register] 模块不存在: {name}")
+        print(f"[register] {name} 操作失败：{why or '模块不存在'}")
         return 1
 
     if argv[0] == "--uninstall" and len(argv) >= 2:
