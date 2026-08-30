@@ -219,7 +219,7 @@ textarea { resize: vertical; line-height: 1.6; }
 .modal { width: min(560px, 100%); overflow: hidden; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: 0 24px 70px rgba(20, 35, 25, .18); }
 .modal header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .modal h2 { margin: 0; font-size: 19px; }
-.modal-body { padding: 20px; }
+.modal-body { padding: 20px; max-height: calc(100vh - 170px); overflow-y: auto; }
 .toast { position: fixed; z-index: 120; right: 24px; bottom: 24px; padding: 10px 14px; border-radius: 9px; background: #26382d; color: #fff; font-size: 13px; opacity: 0; transform: translateY(8px); transition: .2s; }
 .toast.show { opacity: 1; transform: none; }
 
@@ -304,6 +304,17 @@ textarea { resize: vertical; line-height: 1.6; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .modal-note { color: var(--text-secondary); font-size: 12.5px; margin-bottom: 12px; }
 .modal-log { display: grid; gap: 6px; }
+
+/* 模块设置弹窗控件（260829 issue #5/#9）：boolean 胶囊同行 + choice chip 多选 */
+/* 仅作用于模块设置表单（setting-group 内的 div.field），不碰 label.field 旧弹窗（密码/高级配置） */
+.setting-group .field { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.setting-group .field > small { flex-basis: 100%; order: 3; font-weight: 500; }
+.setting-group .field > .toggle { margin-left: auto; cursor: pointer; }
+.chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { padding: 4px 10px; border: 1px solid var(--border); border-radius: 99px; background: var(--surface); color: var(--text-secondary); font-size: 12.5px; cursor: pointer; }
+.chip small { opacity: .65; font-size: 10.5px; }
+.chip-on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); font-weight: 650; }
+.input-type-number { font-variant-numeric: tabular-nums; }
 .log-line { padding: 8px 10px; border-radius: 8px; background: var(--surface-subtle); font: 12px ui-monospace, monospace; color: var(--text-secondary); }
 .log-line b { color: var(--text-tertiary); font-weight: 600; margin-right: 8px; }
 .city-search { margin-bottom: 12px; }

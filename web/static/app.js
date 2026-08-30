@@ -382,15 +382,24 @@ function openModuleSettings(name) {
       if (f.type === "select") {
         const opts = (f.options || []).map(o => `<option value="${esc(o.value)}" ${String(val) === String(o.value) ? "selected" : ""}>${esc(o.label || o.value)}</option>`).join("");
         input = `<select data-key="${esc(f.key)}" data-type="select">${opts}</select>`;
+      } else if (f.type === "choice") {
+        // 多选词条（chip）：候选=模块 directions 预设 + 自定义 prompt（后端 _enrich_module 注入）
+        const chosen = Array.isArray(val) ? val : (val ? String(val).split(/[,，]/).filter(Boolean) : []);
+        const chips = (f.candidates || []).map(c => {
+          const on = chosen.includes(c.value);
+          return `<button type="button" class="chip ${on ? "chip-on" : ""}" data-choice-value="${esc(c.value)}" ${c.preset ? 'data-choice-preset="1"' : ""}>${esc(c.value)}${c.preset ? " <small>预设</small>" : ""}</button>`;
+        }).join("");
+        input = `<div class="chip-list" data-key="${esc(f.key)}" data-type="choice">${chips || '<small class="modal-note">暂无候选</small>'}${f.max ? `<input type="hidden" data-max="${esc(f.max)}">` : ""}</div>`;
       } else if (f.type === "boolean") {
-        input = `<input type="checkbox" data-key="${esc(f.key)}" data-type="boolean" ${val === true || val === "true" ? "checked" : ""}>`;
+        input = `<span class="toggle ${val === true || val === "true" ? "on" : ""}" data-key="${esc(f.key)}" data-type="boolean" role="switch" tabindex="0"><i></i></span>`;
       } else if (f.type === "tags") {
         input = `<textarea data-key="${esc(f.key)}" data-type="tags" rows="4">${esc(Array.isArray(val) ? val.join("\n") : String(val))}</textarea>`;
-      } else { // string / path 等文本输入
-        input = `<input data-key="${esc(f.key)}" data-type="string" value="${esc(val)}">`;
+      } else { // string / path / number 文本输入
+        const num = f.type === "number" ? " input-type-number" : "";
+        input = `<input data-key="${esc(f.key)}" data-type="string" value="${esc(val)}"${num}${f.min != null && f.type === "number" ? ` min="${esc(f.min)}"` : ""}${f.max != null && f.type === "number" ? ` max="${esc(f.max)}"` : ""}>`;
       }
       const cond = f.show_when ? JSON.stringify(f.show_when) : "";
-      return `<label class="field" data-show-when='${esc(cond)}'>${esc(f.label)}${f.desc ? `<small>${esc(f.desc)}</small>` : ""}${input}</label>`;
+      return `<div class="field" data-show-when='${esc(cond)}'>${esc(f.label)}${f.desc ? `<small>${esc(f.desc)}</small>` : ""}${input}</div>`;
     };
     const groups = (module.settings_schema || []);
     const body = groups.length ? groups.map(g =>
@@ -405,13 +414,36 @@ function openModuleSettings(name) {
         const ok = Object.entries(cond).every(([k, v]) => {
           const src = node.querySelector(`[data-key="${k}"]`);
           if (!src) return false;
-          const sv = src.dataset.type === "boolean" ? String(src.checked) : String(src.value);
+          const sv = src.dataset.type === "boolean" ? String(src.querySelector("i")?.parentElement.classList.contains("on"))
+            : src.dataset.type === "choice" ? JSON.stringify(collectChips(src))
+            : String(src.value);
           return sv === String(v);
         });
         el.style.display = ok ? "" : "none";
       });
     };
-    $$("[data-type='select'], [data-type='boolean']", node).forEach(s => s.addEventListener("change", applyShowWhen));
+    const collectChips = holder => $$("[data-choice-value]", holder).filter(c => c.classList.contains("chip-on")).map(c => c.dataset.choiceValue);
+    // choice chip 切换 + boolean 胶囊点击（事件委托，弹窗内动态元素统一处理）
+    node.addEventListener("click", e => {
+      const chip = e.target.closest("[data-choice-value]");
+      if (chip) {
+        const list = chip.closest("[data-type='choice']");
+        const max = list.querySelector("[data-max]")?.dataset.max;
+        if (!chip.classList.contains("chip-on") && max && list.querySelectorAll(".chip-on").length >= +max) {
+          toast(`最多选择 ${max} 项`, "error"); return;
+        }
+        chip.classList.toggle("chip-on");
+        applyShowWhen();
+        return;
+      }
+      const tg = e.target.closest("[data-type='boolean']");
+      if (tg) { tg.classList.toggle("on"); applyShowWhen(); }
+    });
+    node.addEventListener("keydown", e => {
+      const tg = e.target.closest?.("[data-type='boolean']");
+      if (tg && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); tg.classList.toggle("on"); applyShowWhen(); }
+    });
+    $$("[data-type='select']", node).forEach(s => s.addEventListener("change", applyShowWhen));
     applyShowWhen();
     $("[data-module-save]", node).onclick = async () => {
       const settings = {};
@@ -419,7 +451,8 @@ function openModuleSettings(name) {
         const holder = x.closest("[data-show-when]");
         if (holder && holder.style.display === "none") return;  // 隐藏字段不提交
         const t = x.dataset.type;
-        if (t === "boolean") settings[x.dataset.key] = x.checked;
+        if (t === "boolean") settings[x.dataset.key] = x.classList.contains("on");
+        else if (t === "choice") settings[x.dataset.key] = $$("[data-choice-value]", x).filter(c => c.classList.contains("chip-on")).map(c => c.dataset.choiceValue);
         else if (t === "tags") settings[x.dataset.key] = x.value.split("\n").map(s => s.trim()).filter(Boolean);
         else settings[x.dataset.key] = x.value;
       });
