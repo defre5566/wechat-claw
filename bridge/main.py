@@ -523,6 +523,8 @@ class BridgeCore:
         spawn_task(self.push_worker(), "push_worker")
         spawn_task(self.retry_worker(), "retry_worker")
         spawn_task(scheduler(), "scheduler")
+        from .scheduler import set_push_queue
+        set_push_queue(self.push_queue)  # 引擎级告警直投微信（scheduler 同 loop）
         spawn_task(self._check_agents_reload(), "agents_reload")
         from .state import TOKEN_FILE
         log.info(

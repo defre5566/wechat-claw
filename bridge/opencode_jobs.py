@@ -358,6 +358,18 @@ def _platform_kind() -> str:
     return "linux"
 
 
+def _mark_bridge_carrier(job_path: Path) -> None:
+    """降级标记：job.json 原子补写 carrier=bridge（scheduler tick 据此接管触发）。"""
+    try:
+        data = json.loads(job_path.read_text(encoding="utf-8"))
+        data["carrier"] = "bridge"
+        tmp = job_path.with_name(job_path.name + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, job_path)
+    except Exception as e:  # noqa: BLE001 标记失败不阻断降级（tick 侧读取时容错）
+        log.warning("[opencode-jobs] carrier 标记写入失败: %s", e)
+
+
 def install_job(module: str, name: str, schedule: str, prompt: str,
                 timeout: int = 1800, workdir: str | None = None, dry: bool = False) -> dict:
     """登记 job：写 job.json + 按平台生成精确定时器（dry=True 只写文件不碰系统）。
@@ -391,15 +403,26 @@ def install_job(module: str, name: str, schedule: str, prompt: str,
         raise
 
     kind = _platform_kind()
-    if kind == "windows":
-        plans = _schtasks_plans(parsed, schedule)
-        unit_refs = _install_windows_timers(slug, job_path, plans, job["workdir"], dry=dry)
-    elif kind == "darwin":
-        unit_refs = _install_launchd(slug, job_path, parsed, job["workdir"], dry=dry)
-    else:
-        unit_refs = _install_systemd(slug, job_path, schedule, job["workdir"], dry=dry)
+    carrier = {"windows": "schtasks", "darwin": "launchd"}.get(kind, "systemd")
+    degraded_reason = ""
+    try:
+        if kind == "windows":
+            plans = _schtasks_plans(parsed, schedule)
+            unit_refs = _install_windows_timers(slug, job_path, plans, job["workdir"], dry=dry)
+        elif kind == "darwin":
+            unit_refs = _install_launchd(slug, job_path, parsed, job["workdir"], dry=dry)
+        else:
+            unit_refs = _install_systemd(slug, job_path, schedule, job["workdir"], dry=dry)
+    except OSError as e:
+        # 平台载体不可用（如 systemd/user 目录只读 Errno 30）→ 降级 bridge 内置调度
+        # （scheduler tick 到点 spawn 同一 supervisor，执行链路不变）；配置错误仍上抛。
+        carrier = "bridge"
+        degraded_reason = f"{e}"
+        unit_refs = []
+        _mark_bridge_carrier(job_path)
 
-    return {"ok": True, "slug": slug, "job_path": str(job_path), "timers": unit_refs}
+    return {"ok": True, "slug": slug, "job_path": str(job_path), "timers": unit_refs,
+            "carrier": carrier, "degraded_reason": degraded_reason}
 
 
 # ---------- 平台定时器生成 ----------

@@ -9,7 +9,9 @@ rc≠0 且 retry 配置非空 → 记失败并按间隔补发（≤max 次）；
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import random
 import sys
 from datetime import datetime, timedelta
@@ -177,7 +179,7 @@ async def run_module(name: str, args: list[str] | None = None) -> int:
     script = resolve_worker_path(MODULES_DIR / name, name)
     if script is None:
         log.error(f"[sched] 模块脚本不存在: {MODULES_DIR / name / f'{name}_worker.py'}")
-        _worker_missing_alert(name)
+        await _worker_missing_alert(name)
         return 2
     cmd = [sys.executable, str(script)] + (args or [])
     # 注入 PYTHONPATH：worker 脚本 sys.path 只有脚本目录+modules/（todo_worker 注入 parent.parent），
@@ -223,20 +225,147 @@ def _integrity_alert(name: str, why: str) -> None:
 
 
 _worker_missing_alerted: dict[str, str] = {}  # 模块 → 当日日期（worker 缺失告警每日去重）
+_push_queue: asyncio.Queue | None = None      # 微信告警投递队列（BridgeCore 启动时注入）
 
 
-def _worker_missing_alert(name: str) -> None:
-    """worker 脚本缺失告警：引擎侧问题（非模块 bug），每日每模块至多一条防刷屏。"""
+def set_push_queue(q: asyncio.Queue) -> None:
+    """注入 push 队列引用（bridge 内部引擎级告警直投微信，不再只有日志）。"""
+    global _push_queue
+    _push_queue = q
+
+
+async def _push_wechat_alert(module: str, event: str, text: str) -> None:
+    """引擎级告警直投微信（direct 文本）；每模块每事件每日一条去重；队列失败只写日志。"""
     from datetime import date
+    key = f"{module}:{event}"
     today = date.today().isoformat()
-    if _worker_missing_alerted.get(name) == today:
+    if _worker_missing_alerted.get(key) == today:
         return
-    _worker_missing_alerted[name] = today
+    _worker_missing_alerted[key] = today
     try:
         from modules.common.log import log_event
-        log_event("ERROR", name, "worker_missing", "模块 worker 脚本缺失，该模块调度将持续失败（引擎级）")
+        log_event("ERROR", module, event, text)
     except Exception:
-        pass  # 事件日志失败不阻塞调度主流程
+        pass
+    if _push_queue is None:
+        return
+    try:
+        await _push_queue.put({"type": "direct", "text": f"[引擎告警] {text}"})
+    except Exception as e:  # noqa: BLE001
+        log.warning("[sched] 告警投递失败（%s）: %s", event, e)
+
+
+async def _worker_missing_alert(name: str) -> None:
+    """worker 脚本缺失告警：引擎侧问题（非模块 bug），每模块每日至多一条防刷屏。"""
+    await _push_wechat_alert(name, "worker_missing",
+                             f"{name} 模块的 worker 脚本缺失，该模块调度将持续失败（引擎级问题）")
+
+
+# ---------- 降级 job 的 bridge 内置触发（#11 自适应：carrier=bridge） ----------
+
+def _cron_matches_now(parsed: dict, now: datetime) -> bool:
+    """cron 展开字段对当前时刻逐项匹配（dom/dow 双非 * 已在 _parse_cron 拒绝）。"""
+    if now.minute not in parsed.get("minute", []):
+        return False
+    if now.hour not in parsed.get("hour", []):
+        return False
+    if now.day not in parsed.get("dom", [now.day]):
+        return False
+    if now.month not in parsed.get("month", [now.month]):
+        return False
+    if now.weekday() + 1 not in parsed.get("dow", [now.weekday() + 1]) and (
+            now.weekday()) not in parsed.get("dow", [now.weekday()]):
+        return False  # cron dow: 0=周日/1=周一…6=周六；python weekday: 0=周一
+    return True
+
+
+async def _agent_job_check(now: datetime) -> None:
+    """carrier=bridge 的降级 job 触发（跨越检测 + last_run 防重 + Persistent 补跑）。
+
+    - 跨越检测：上次 tick 时刻到本次之间是否跨过触发分钟（不依赖 tick 恰好整分）
+    - last_run：写回 job.json（同盘原子）——同日不重复执行
+    - Persistent 语义：启动/补扫时发现"今天已过触发点但 last_run < 今天"→ 补跑一次
+    """
+    from bridge.opencode_jobs import _parse_cron, _supervisor_cmd, jobs_dir, _job_env
+    from bridge.config import WORK_ROOT
+
+    jd = jobs_dir()
+    if not jd.is_dir():
+        return
+    for jp in sorted(jd.glob("*.json")):
+        try:
+            data = json.loads(jp.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if data.get("carrier") != "bridge":
+            continue  # systemd/schtasks/launchd 载体由平台定时器触发，bridge 跳过
+        try:
+            parsed = _parse_cron(data.get("schedule", ""))
+        except ValueError:
+            continue
+        due = (_cron_matches_now(parsed, now)
+               or (now > _scheduled_today(parsed, now) and
+                   str(data.get("last_run", "")) < now.date().isoformat()))
+        if not due:
+            continue
+        module = str(data.get("module") or "?")
+        log.info("[sched] bridge 触发降级 job: %s（%s）", data.get("slug"), module)
+        _stamp_last_run(jp, now)
+        env = {**os.environ, **_job_env()}
+        cmd = _supervisor_cmd(jp)
+        timeout = int(data.get("timeoutSeconds", 1800))
+        slug = data.get("slug") or jp.stem
+        task = asyncio.create_task(_run_supervisor(cmd, env, str(WORK_ROOT), timeout, slug, jp))
+        _supervisor_tasks.add(task)
+        task.add_done_callback(_supervisor_tasks.discard)
+        await _push_wechat_alert(module, "bridge_job_fired",
+                                 f"{module} 的 agent job 已由 bridge 内置调度触发（平台定时器降级模式）")
+
+
+_supervisor_tasks: set = set()  # 在跑的降级 supervisor 任务（引用保活 + 完成自清）
+
+
+async def _run_supervisor(cmd: list, env: dict, cwd: str, timeout: int, slug: str, job_path: Path) -> None:
+    """执行降级 job 的 supervisor 子进程（超时终止；结果记日志 + 失败告警一次）。"""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env=env, cwd=cwd, creationflags=no_window_flags(),
+        )
+    except OSError as e:
+        log.error(f"[sched] 降级 job {slug} 启动失败: {e}")
+        await _push_wechat_alert(slug, "bridge_job_fail", f"{slug} 的 agent job 启动失败：{e}")
+        return
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        log.error(f"[sched] 降级 job {slug} 超时（{timeout}s），已终止")
+        await _push_wechat_alert(slug, "bridge_job_fail", f"{slug} 的 agent job 超时（{timeout}s）")
+        return
+    if proc.returncode == 0:
+        log.info(f"[sched] 降级 job {slug} 执行成功")
+    else:
+        tail = (err or out or b"").decode("utf-8", "replace")[-200:].strip()
+        log.error(f"[sched] 降级 job {slug} 失败 rc={proc.returncode}：{tail}")
+        await _push_wechat_alert(slug, "bridge_job_fail", f"{slug} 的 agent job 执行失败（rc={proc.returncode}）")
+
+
+def _scheduled_today(parsed: dict, now: datetime) -> datetime:
+    """今天该 job 的最近触发时刻（用于 Persistent 补发判定：已过时刻但未执行 → 补跑）。"""
+    return now.replace(hour=min(parsed.get("hour", [now.hour])), minute=max(parsed.get("minute", [0])),
+                       second=0, microsecond=0)
+
+
+def _stamp_last_run(job_path: Path, now: datetime) -> None:
+    try:
+        data = json.loads(job_path.read_text(encoding="utf-8"))
+        data["last_run"] = now.date().isoformat()
+        tmp = job_path.with_name(job_path.name + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, job_path)
+    except Exception as e:  # noqa: BLE001
+        log.warning("[sched] last_run 写回失败: %s", e)
 
 
 _daily_check_date: str = ""  # 上次执行每日更新的日期（进程内去重）
@@ -288,6 +417,10 @@ async def scheduler() -> None:
     while True:
         now = datetime.now()
         await _daily_update_check(now)  # 每日自动更新检查（指纹驱动，静默）
+        try:
+            await _agent_job_check(now)  # 降级 job 的 bridge 内置触发（#11 自适应）
+        except Exception as e:  # noqa: BLE001 绝不让单类检查异常杀死调度循环
+            log.error(f"[sched] agent job 检查异常（已吞）: {e}")
         nxt = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
         await asyncio.sleep(max(1.0, (nxt - now).total_seconds() + 0.5))
         try:

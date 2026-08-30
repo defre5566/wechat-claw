@@ -61,7 +61,7 @@ def test_scheduler_missing_worker_rc2_and_alert_dedup(tmp_path, monkeypatch, cap
     events = [r for r in caplog.records if "worker_missing" in r.message] if caplog.records else []
     # log_event 走 modules.common.log（已 caplog 捕获不到？改断言内部标记）
     from datetime import date
-    assert sch._worker_missing_alerted["Ghost"] == date.today().isoformat()
+    assert sch._worker_missing_alerted["Ghost:worker_missing"] == date.today().isoformat()
 
 
 def test_scheduler_resolves_lowercase_worker(tmp_path, monkeypatch):

@@ -261,9 +261,16 @@ def sync_jobs(name: str) -> dict:
         return {"ok": False, "error": f"opencode scheduler 登记失败: {e}",
                 "job": r["job"], "job_file": r["job_file"]}
 
+    if inst.get("carrier") == "bridge":
+        # 平台载体降级（如 systemd/user 只读）→ bridge tick 接管触发（#11 自适应）
+        from modules.common.log import log_event
+        log_event("ERROR", name, "job_degraded",
+                  f"平台定时器登记失败（{inst.get('degraded_reason')}），已降级为 bridge 内置调度")
+        r["job_degraded"] = inst.get("degraded_reason", "")
+
     r["install_hint"] = (
         f"job json（数据区留存）: {r['job_file']}\n"
-        f"已自动登记 opencode scheduler: {inst['slug']}（timers={inst.get('timers') or '?'}）"
+        f"已自动登记 opencode scheduler: {inst['slug']}（carrier={inst.get('carrier')}）"
     )
     return r
 
@@ -299,3 +306,34 @@ def sync_module_jobs(name: str) -> dict:
                 return unregister_jobs(name)
             break
     return sync_jobs(name)
+
+
+def job_registered(module: str) -> tuple[bool, str]:
+    """模块 agent job 登记状态查询（common 库承诺接口，worker 诊断用）。
+
+    返回 (已登记与否, 状态说明)：
+    - (True, "systemd/…") = 平台定时器已登记
+    - (True, "bridge")    = 平台载体不可用，已降级 bridge 内置调度（仍会执行）
+    - (False, 原因)        = 未登记（声明了 job_template 但登记失败/被停用联动注销）
+    """
+    from bridge.opencode_jobs import jobs_dir, sched_root, scope_id
+    platform_dir = jobs_dir()                    # 平台登记层（install_job 写入处）
+    audit_dir = module_data_dir(module) / "jobs"  # 模块数据区审计留存
+    platform_jobs = {f.stem: f for f in platform_dir.glob("*.json")} if platform_dir.is_dir() else {}
+    audit_jobs = {f.stem: f for f in audit_dir.glob("*.json")} if audit_dir.is_dir() else {}
+    registered = {k for k in platform_jobs if k in audit_jobs or audit_dir.is_dir() and platform_jobs[k].stem}
+    # 语义：平台层有该模块的 job.json = 已登记（carrier=bridge 为降级中，仍会执行）
+    mine = {}
+    for slug, pf in platform_jobs.items():
+        try:
+            data = json.loads(pf.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if data.get("module") == module:
+            mine[slug] = data.get("carrier", "systemd")
+    if not mine:
+        if audit_jobs:
+            return False, "审计留存存在但平台登记缺失（半登记态，建议重存设置触发重登记）"
+        return False, "模块数据区无 jobs 产物（无 job 声明或从未登记）"
+    degraded = [f"{slug}: carrier=bridge（降级中）" for slug, c in mine.items() if c == "bridge"]
+    return True, "；".join(degraded) if degraded else "平台定时器已登记"

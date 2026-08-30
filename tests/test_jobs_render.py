@@ -257,4 +257,4 @@ def test_sync_jobs_consumes_timers_field(tmp_path, monkeypatch):
     )
     r = jobs.sync_jobs("Planner")
     assert r["ok"], r
-    assert "timers=" in r["install_hint"] and "Planner-morning-briefing" in r["install_hint"]
+    assert "carrier=" in r["install_hint"] and "Planner-morning-briefing" in r["install_hint"]
