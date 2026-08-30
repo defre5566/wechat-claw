@@ -170,23 +170,25 @@ function modules() {
   const sources = state.sources || [];
   return `<section class="page secondary-page">${heading("模块管理", "管理模块源、已安装模块、版本和运行状态。")}<div class="module-stagger">
     <article class="card panel module-sources"><div class="panel-head"><div><h2>模块源</h2><p>管理模块目录的仓库和本地路径。</p></div><button class="btn btn-primary" data-open="add-source">＋ 添加模块源</button></div><div class="source-list">${sources.length ? sources.map(s => `<div class="source-row"><div class="source-name"><strong>${esc(s.name || s.id)}</strong><small>${esc(s.url || "本地模块源")} · ${(s.modules || []).length} 个模块</small></div><span class="source-url">${esc(s.url || "本地")}</span><button class="btn btn-secondary btn-sm" data-source-refresh="${esc(s.id || "")}">刷新</button>${s.builtin ? "" : `<button class="btn btn-danger btn-sm" data-source-remove="${esc(s.id || "")}">删除</button>`}</div>`).join("") : '<p class="modal-note">暂无模块源</p>'}</div></article>
-    <article class="card panel module-control-panel"><div class="module-top-actions"><div><h2>已安装模块</h2><p>检查更新、刷新列表，或添加新的模块能力。</p></div><div class="module-buttons"><button class="btn btn-secondary" data-check>检查更新</button><button class="btn btn-secondary" data-refresh>刷新列表</button><button class="btn btn-primary" data-open="install">＋ 添加模块</button></div></div><div class="module-grid">${state.modules.map(moduleCard).join("") || '<p class="modal-note">还没有安装模块</p>'}</div></article>
+    <article class="card panel module-control-panel"><div class="module-top-actions"><div><h2>已安装模块</h2><p>检查更新、刷新列表，或添加新的模块能力。</p></div><div class="module-buttons"><span class="auto-update-toggle" title="每日定时检查模块源更新（时刻见高级运行配置）"><b>自动更新</b><span class="toggle ${state.advSettings?.update?.auto_enabled !== false ? "on" : ""}" data-auto-update role="switch" tabindex="0"><i></i></span></span><button class="btn btn-secondary" data-check>检查更新</button><button class="btn btn-secondary" data-refresh>刷新列表</button><button class="btn btn-primary" data-open="install">＋ 添加模块</button></div></div><div class="module-grid">${state.modules.map(moduleCard).join("") || '<p class="modal-note">还没有安装模块</p>'}</div></article>
   </div></section>`;
 }
 
 async function loadData() {
-  const [profile, modules, sources, weather, autostart, status] = await Promise.all([
+  const [profile, modules, sources, weather, autostart, status, advSettings] = await Promise.all([
     api.get("/api/profile"),
     api.get("/api/admin/modules"),
     api.get("/api/admin/sources"),
     api.get("/api/admin/weather").catch(() => null),
     api.get("/api/admin/autostart").catch(() => null),
     api.get("/api/admin/status").catch(() => null),
+    api.get("/api/admin/settings").catch(() => null),
   ]);
   state.profile = profile;
   state.modules = modules.modules || [];
   state.sources = sources.sources || [];
   state.weather = weather?.ok ? weather : null;
+  state.advSettings = advSettings?.settings || null;
   if (autostart?.ok) {
     state.autostartMode = autostart.mode || "none";
     state.autostart = autostart.mode !== "none";
@@ -261,6 +263,23 @@ function bind() {
   $$('[data-update="download"]').forEach(b => b.onclick = () => { window.open("https://github.com/defre5566/wechat-claw/releases/latest", "_blank"); });
   $$('[data-toast]').forEach(b => b.onclick = () => toast(b.dataset.toast));
   $("[data-card-manager]")?.addEventListener("click", openCardManager);
+  // 模块自动更新全局开关（config.yaml update 段；模块级 auto_update 在各模块设置里）
+  $("[data-auto-update]")?.addEventListener("click", async e => {
+    const tg = e.currentTarget;
+    const on = !tg.classList.contains("on");
+    tg.disabled = true;
+    try {
+      const cur = state.advSettings || {};
+      const d = await api.post("/api/admin/settings", {
+        settings: { update: { auto_enabled: on, check_time: cur.update?.check_time || "04:00" } },
+      });
+      if (!d.ok) throw new Error(d.errors?.join("；") || "保存失败");
+      tg.classList.toggle("on", on);
+      toast(on ? "模块自动更新已开启（每日定时检查）" : "模块自动更新已关闭", "success");
+      state.advSettings = { ...cur, update: { auto_enabled: on, check_time: cur.update?.check_time || "04:00" } };
+    } catch (err) { toast(err.message, "error"); }
+    finally { tg.disabled = false; }
+  });
   $$('[data-remove-card]').forEach(b => b.onclick = () => { const node = b.closest("[data-plugin-card]"); if (node) node.remove(); const next = cards().filter(x => x !== b.dataset.removeCard); localStorage.setItem(CARDS_KEY, JSON.stringify(next)); toast("卡片已移除"); });
   $$('[data-locate]').forEach(b => b.onclick = () => locateCity());
   $$('[data-source-refresh]').forEach(b => b.onclick = async () => { b.disabled = true; try { const d = await api.post("/api/admin/sources/refresh", { id: b.dataset.sourceRefresh }); if (d.ok) { state.sources = (await api.get("/api/admin/sources")).sources || []; render(); toast("模块源已刷新", "success"); } else { toast(d.error || "刷新失败", "error"); } } catch (e) { toast(e.message, "error"); } finally { b.disabled = false; } });
@@ -333,8 +352,32 @@ function openModal(name) {
     $("[data-pwd-save]", node).onclick = async () => { const next = $("#newPwd", node).value; if (next.length < 6 || next !== $("#confirmPwd", node).value) return toast("新密码至少 6 位且两次一致", "error"); try { await api.post("/api/admin/password", { old: $("#oldPwd", node).value, new: next }); api.clearToken(); location.href = "/login.html"; } catch (e) { toast(e.message, "error"); } };
   } else if (name === "advanced") {
     Promise.all([api.get("/api/admin/schema"), api.get("/api/admin/settings")]).then(([schema, settings]) => {
-      const node = modal("高级运行配置", `<div class="field-group">${(schema.schema || []).map(g => `<label class="field">${esc(g.title)}${(g.fields || []).map(f => `<input data-key="${esc(f.key)}" value="${esc(settings.settings?.[g.group]?.[f.key] ?? f.default ?? "")}">`).join("")}</label>`).join("")}<div class="modal-actions"><button class="btn btn-primary btn-sm" data-adv-save>保存设置</button></div></div>`);
-      $("[data-adv-save]", node).onclick = async () => { const output = {}; $$("[data-key]", node).forEach(f => { output[f.dataset.key] = f.value; }); try { await api.post("/api/admin/settings", { settings: { advanced: output } }); node.remove(); toast("高级设置已保存", "success"); } catch (e) { toast(e.message, "error"); } };
+      // Ⅳ-3：按 schema 类型渲染（text/number/list；hint 提示透传）——此前全部裸 input
+      const advField = (f, group) => {
+        const val = settings.settings?.[group]?.[f.key] ?? f.default ?? "";
+        const hint = f.hint ? `<small>${esc(f.hint)}</small>` : "";
+        const key = `${group}.${f.key}`;
+        if (f.type === "number") {
+          return `<label class="field">${esc(f.label)}<input type="number" data-key="${esc(key)}" value="${esc(val)}"${f.min != null ? ` min="${esc(f.min)}"` : ""}${f.max != null ? ` max="${esc(f.max)}"` : ""}>${hint}</label>`;
+        }
+        if (f.type === "list") {
+          return `<label class="field">${esc(f.label)}<textarea data-key="${esc(key)}" data-type="list" rows="4">${esc(Array.isArray(val) ? val.join("\n") : String(val))}</textarea>${hint}<small>每行一项</small></label>`;
+        }
+        return `<label class="field">${esc(f.label)}<input data-key="${esc(key)}" value="${esc(val)}">${hint}</label>`;
+      };
+      const node = modal("高级运行配置", `<div class="field-group">${(schema.schema || []).map(g => `<h3 class="adv-group">${esc(g.title)}</h3>${(g.fields || []).map(f => advField(f, g.group)).join("")}`).join("")}<div class="modal-actions"><button class="btn btn-primary btn-sm" data-adv-save>保存设置</button></div></div>`);
+      $("[data-adv-save]", node).onclick = async () => {
+        // 按组提交（group 前缀进 data-key）：组名错位曾是 advanced 组被 schema 静默丢弃的根因
+        const output = {};
+        $$("[data-key]", node).forEach(f => {
+          const [group, key] = f.dataset.key.split(".");
+          const holder = f.closest("[data-show-when]");
+          output[group] = output[group] || {};
+          if (f.dataset.type === "list") output[group][key] = f.value.split("\n").map(x => x.trim()).filter(Boolean);
+          else output[group][key] = f.value;
+        });
+        try { await api.post("/api/admin/settings", { settings: output }); node.remove(); toast("高级设置已保存", "success"); } catch (e) { toast(e.message, "error"); }
+      };
     }).catch(e => toast(e.message, "error"));
   } else if (name === "city") {
     fetch("/cities.json").then(r => r.json()).then(cities => {

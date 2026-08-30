@@ -401,8 +401,19 @@ def settings_set(app, body: dict | None = None) -> dict:
     clean = result["clean"]
     try:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # 合并写入（group 级）：clean 只含 schema 内组——整文件覆盖会清掉 schema 外
+        # 仍需保留的段（如 update.auto_enabled 已迁模块页、历史残留段）
+        existing = {}
+        if CONFIG_FILE.is_file():
+            try:
+                existing = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
+                if not isinstance(existing, dict):
+                    existing = {}
+            except Exception:
+                existing = {}
+        merged = {**existing, **clean}
         CONFIG_FILE.write_text(
-            yaml.safe_dump(clean, allow_unicode=True, sort_keys=False), encoding="utf-8"
+            yaml.safe_dump(merged, allow_unicode=True, sort_keys=False), encoding="utf-8"
         )
         return {"ok": True}
     except OSError as e:
