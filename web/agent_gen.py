@@ -40,6 +40,10 @@ INDEX_DIR = INSTRUCTIONS_DIR / "index"
 
 # 出厂 tier 基线文件（tier0~4，装载条数 = 级别 + 1）
 TIER_FILES = [f"tier{i}.md" for i in range(5)]
+# 每档可承载条目预算（260829 P1：从 5×60 字放宽——部署实测朴素输入会丢失大量
+# 语气细节；tier-current 装载有阶梯机制挡着，冷启动 token 仍远小于旧 AGENTS.md）
+TIER_BUDGET = [1, 2, 4, 5, 8]
+TIER_LINE_MAX = 80  # 单条字数上限
 # 当前档位兜底：无画像时 L0 起步（260827 第七章定案）
 CURRENT_TIER = "tier-current.md"
 DEFAULT_TIER = "tier0.md"
@@ -140,7 +144,7 @@ def ensure_builtins() -> Path:
 
 # ---------- tier 分档生成（web 两框保存 → opencode run 输出协议） ----------
 
-TIER_PROMPT = """你是 wechat-claw 助理人设编辑器。任务：把用户的朴素输入整理为助理人设的分档规范文件。
+TIER_PROMPT = """你是 wechat-claw 助理人设编辑器。任务：把用户的朴素输入整理为助理人设的分档规范内容。
 
 【用户输入】
 称呼要求：{address}
@@ -166,6 +170,7 @@ TIER_PROMPT = """你是 wechat-claw 助理人设编辑器。任务：把用户�
 第1条
 第2条
 第3条
+第4条
 ===END_TIER2===
 
 ===TIER3===
@@ -173,6 +178,7 @@ TIER_PROMPT = """你是 wechat-claw 助理人设编辑器。任务：把用户�
 第2条
 第3条
 第4条
+第5条
 ===END_TIER3===
 
 ===TIER4===
@@ -181,28 +187,33 @@ TIER_PROMPT = """你是 wechat-claw 助理人设编辑器。任务：把用户�
 第3条
 第4条
 第5条
+第6条
+第7条
+第8条
 ===END_TIER4===
 
-【分档逻辑】所有档共用同一条目序列的第 1~N 条：
-先产出一条完整的优先级序列（共 5 条），从最不可少的排到最锦上添花的：
+【分档逻辑】所有档共用同一条目序列的第 1~N 条（预算：1/2/4/5/8 条）：
+先产出一条完整的优先级序列（共 8 条），从最不可少的排到最锦上添花的：
 第 1 条 = 身份核心（谁是谁、如何称呼对方）；其后依次是基础语气、
 常用交互风格、更细的表达偏好、附加加分项。
-然后 tierN = 该序列前 N+1 条的原样拷贝，一行一条，不加序号。
+然后 tierN = 该序列前预算条数的原样拷贝，一行一条，不加序号。
 
 【条目规范】
-- 每条一句紧凑规范句，≤60 字，直接可作系统提示使用，不解释理由
+- 每条一句紧凑规范句，≤80 字，直接可作系统提示使用，不解释理由
 - 文件内不得出现标题、空行、markdown 符号或 JSON 结构
+- 逐条覆盖输入要点，不得丢弃原文语义要素（语气比喻、风格限定词必须保留）
+- 允许把相近要点整合为一句，但整合后总信息量不得少于原文
 - 只允许重组用户输入的信息，禁止虚构新的性格细节、经历或能力承诺
 - 输入信息不足以撑满某档时，可用中性的通用措辞补位（如"回应务实简短"），不得编造
 
-【自查】输出前逐一核对五个区块的行数是否等于 1/2/3/4/5，并核对高档包含低档的全部前缀。
+【自查】输出前逐一核对五个区块的条数是否为 1/2/4/5/8，并核对高档包含低档的全部前缀。
 """
 
 TIER_RUN_TIMEOUT = 120  # 与 admin.optimize_persona 同口径
 
 
 def _validate_tiers(d: Path) -> bool:
-    """硬校验：tier0~4 存在且非空行数 = 级别 + 1（bridge 侧兜底，prompt 自查仅为软约束）。"""
+    """硬校验：tier0~4 存在且非空行数 = 预算条数（bridge 侧兜底，prompt 自查仅为软约束）。"""
     for i, fname in enumerate(TIER_FILES):
         f = d / fname
         if not f.is_file():
@@ -211,7 +222,7 @@ def _validate_tiers(d: Path) -> bool:
             lines = [ln for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip()]
         except OSError:
             return False
-        if len(lines) != i + 1:
+        if len(lines) != TIER_BUDGET[i]:
             return False
     return True
 
@@ -230,7 +241,7 @@ def _parse_tier_output(raw: str) -> dict[str, list[str]] | None:
         if marker is None:
             return None
         lines = [line.strip() for line in marker.group(1).splitlines() if line.strip()]
-        if len(lines) != i + 1 or any(len(line) > 60 for line in lines):
+        if len(lines) != TIER_BUDGET[i] or any(len(line) > TIER_LINE_MAX for line in lines):
             return None
         if any(line.startswith(("#", "-", "*", "```")) for line in lines):
             return None
@@ -239,7 +250,7 @@ def _parse_tier_output(raw: str) -> dict[str, list[str]] | None:
     if clean[cursor:].strip():
         return None
     for i in range(1, 5):
-        if result[f"tier{i}"][:i] != result[f"tier{i - 1}"]:
+        if result[f"tier{i}"][:TIER_BUDGET[i - 1]] != result[f"tier{i - 1}"]:
             return None
     return result
 

@@ -123,10 +123,22 @@ def profile_set(app, body: dict | None = None) -> dict:
         agent_gen.set_rules([str(r) for r in body["rules"]])
     if "lifestyle" in body:
         _save_lifestyle(str(body.get("lifestyle", "")))
+    result = {"ok": True}
     if identity_changed:
-        # 人设变更 → 后台重建 tier 分档文件（不阻塞响应；校验不过保留旧文件）
-        agent_gen.regenerate_tiers_async()
-    return {"ok": True}
+        # 人设变更 → 同步重建 tier 分档文件（生成 ~20-120s；失败随响应浮到 UI，
+        # 不再静默后台——260829 P2：异步版让"换人设不生效"无感知）
+        try:
+            regen_ok = agent_gen.regenerate_tiers()
+        except Exception as e:  # noqa: BLE001 tier 生成异常不影响字段保存
+            regen_ok = False
+            result["tiers"] = {"ok": False, "error": str(e)}
+        else:
+            result["tiers"] = {"ok": True} if regen_ok else {
+                "ok": False, "error": "生成校验未通过（详见 web.log），已保留旧人设"}
+        if not regen_ok:
+            result["ok"] = True  # 字段已保存；tier 失败向前端如实报告但不 5xx 整体
+        result["tiers_note"] = "分档在新会话生效"
+    return result
 
 
 def weather_get(app, body: dict | None = None) -> dict:

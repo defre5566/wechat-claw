@@ -12,10 +12,11 @@ def test_ensure_builtins_copies_baseline_and_current(tmp_path, monkeypatch):
     import web.agent_gen as ag
     monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", tmp_path)
     ag.ensure_builtins()
+    from web.agent_gen import TIER_BUDGET
     for i in range(5):
         f = tmp_path / f"tier{i}.md"
         assert f.is_file()
-        assert len([ln for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip()]) == i + 1
+        assert len([ln for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip()]) == TIER_BUDGET[i]
     assert (tmp_path / "tier-current.md").is_file()
     assert (tmp_path / "tier-current.md").read_text(encoding="utf-8") == (
         tmp_path / "tier0.md"
@@ -37,8 +38,9 @@ def test_validate_tiers_ok_and_bad(tmp_path):
     d = tmp_path / "instructions"
     d.mkdir()
     assert not ag._validate_tiers(d)  # 全缺
+    budget = ag.TIER_BUDGET
     for i in range(5):
-        (d / f"tier{i}.md").write_text("\n".join(f"条目{j}" for j in range(i + 1)), encoding="utf-8")
+        (d / f"tier{i}.md").write_text("\n".join(f"条目{j}" for j in range(budget[i])), encoding="utf-8")
     assert ag._validate_tiers(d)
     (d / "tier3.md").write_text("只有一行", encoding="utf-8")  # 行数不符
     assert not ag._validate_tiers(d)
@@ -88,6 +90,14 @@ def _protocol_output(files: dict[str, str]) -> str:
     return "\n\n".join(blocks)
 
 
+def _good_files(budget=None):
+    """按 TIER_BUDGET 生成合格五档（前缀截断关系自动成立）。"""
+    from web.agent_gen import TIER_BUDGET
+    budget = budget or TIER_BUDGET
+    seq = [f"条目{j}" for j in range(budget[-1])]
+    return {f"tier{i}.md": "\n".join(seq[:budget[i]]) for i in range(5)}
+
+
 def _fake_run_output(files: dict[str, str], returncode: int = 0):
     """返回 fake subprocess.run：模型只返回 stdout，不接触任何文件。"""
 
@@ -104,10 +114,12 @@ def _fake_run_output(files: dict[str, str], returncode: int = 0):
     return fake_run
 
 
-def _good_files() -> dict[str, str]:
-    return {
-        f"tier{i}.md": "\n".join(f"条目{j}" for j in range(i + 1)) for i in range(5)
-    }
+def _good_files(budget=None):
+    """按 TIER_BUDGET 生成合格五档（前缀截断关系自动成立）。"""
+    from web.agent_gen import TIER_BUDGET
+    budget = budget or TIER_BUDGET
+    seq = [f"条目{j}" for j in range(budget[-1])]
+    return {f"tier{i}.md": "\n".join(seq[:budget[i]]) for i in range(5)}
 
 
 def test_regenerate_tiers_commits_on_valid(tmp_path, monkeypatch):

@@ -150,7 +150,7 @@ function user() {
   const p = state.profile || {}, i = p.identity || {}, habits = p.habits || [];
   return `<section class="page secondary-page"><header class="page-heading user-heading"><div><h1>用户与助理</h1><p>设置助理的人设、表达方式和对你的了解。</p></div><div class="user-save-actions"><button class="btn btn-secondary" data-undo-all>撤销修改</button><button class="btn btn-primary" data-save-profile>保存用户与助理</button></div></header><form id="profileForm" class="user-rows">
     <div class="user-row-1">
-      <article class="card panel persona-final"><div class="panel-head"><div><span class="card-label">YOUR ASSISTANT</span><h2>助理人设</h2><p>保存后自动生成 AGENTS.md。</p></div><label class="persona-avatar" data-open="avatar"><img src="/api/profile/avatar?ts=${Date.now()}" alt="" onerror="this.remove()">${esc(initials(userName()))}<input id="avatarInput" type="file" accept="image/*" hidden></label></div><div class="persona-avatar-action"><button type="button" class="btn btn-primary btn-sm" data-open="avatar">选择头像</button><button type="button" class="btn btn-secondary btn-sm" data-avatar-undo>撤销头像</button><span>默认使用抽象小助手形象。</span></div><div class="identity-fields"><label class="field">怎么称呼你<input name="address" value="${esc(i.address || "")}"></label><label class="field">助理名称<input name="assistant_name" value="${esc(i.assistant_name || "小助手")}"></label></div><label class="field full">角色设定<textarea name="role" rows="3">${esc(i.role || "")}</textarea></label><label class="field full">语言习惯<textarea name="language" rows="2">${esc(i.language || "")}</textarea></label><div class="inline-actions"><button type="button" class="btn btn-secondary btn-sm" data-optimize>用 opencode 优化</button><button type="button" class="btn btn-quiet" data-undo="identity">撤销</button></div></article>
+      <article class="card panel persona-final"><div class="panel-head"><div><span class="card-label">YOUR ASSISTANT</span><h2>助理人设</h2><p>保存后自动生成分档人设，新会话生效。</p></div><label class="persona-avatar" data-open="avatar"><img src="/api/profile/avatar?ts=${Date.now()}" alt="" onerror="this.remove()">${esc(initials(userName()))}<input id="avatarInput" type="file" accept="image/*" hidden></label></div><div class="persona-avatar-action"><button type="button" class="btn btn-primary btn-sm" data-open="avatar">选择头像</button><button type="button" class="btn btn-secondary btn-sm" data-avatar-undo>撤销头像</button><span>默认使用抽象小助手形象。</span></div><div class="identity-fields"><label class="field">怎么称呼你<input name="address" value="${esc(i.address || "")}"></label><label class="field">助理名称<input name="assistant_name" value="${esc(i.assistant_name || "小助手")}"></label></div><label class="field full">角色设定<textarea name="role" rows="3">${esc(i.role || "")}</textarea></label><label class="field full">语言习惯<textarea name="language" rows="2">${esc(i.language || "")}</textarea></label><div class="inline-actions"><button type="button" class="btn btn-secondary btn-sm" data-optimize>用 opencode 优化</button><button type="button" class="btn btn-quiet" data-undo="identity">撤销</button></div></article>
       <div class="user-side-stack">
         <article class="card panel memory-final"><div class="panel-head"><div><span class="card-label">I REMEMBER</span><h2>我记得这些</h2><p>用于首页建议和模块上下文。</p></div><button type="button" class="btn btn-quiet" data-undo="habits">撤销</button></div><div class="tags" id="habitTags">${habits.map(h => `<span class="tag">${esc(h)}<button type="button" data-remove-habit="${esc(h)}">×</button></span>`).join("")}</div><button type="button" class="btn btn-primary btn-sm" data-open="habit">＋ 添加偏好</button></article>
         <article class="card panel city-final"><div class="panel-head"><div><span class="card-label">YOUR PLACE</span><h2>所在城市</h2><p>天气和本地化模块会使用这里。</p></div><button type="button" class="btn btn-quiet" data-undo="city">撤销</button></div><div class="city-layout"><strong class="city-name">${esc(p.location?.city || "未设置城市")}</strong><span class="city-sub">${esc(p.location?.province || "城市用于天气和本地化信息")}</span><div class="city-footer"><button type="button" class="btn btn-secondary btn-sm" data-locate>定位</button><button type="button" class="btn btn-primary btn-sm" data-open="city">选择城市</button></div></div></article>
@@ -287,19 +287,22 @@ function bindProfile(form) {
     const name = String(d.get("assistant_name") || "").trim();
     const old = state.profile.identity?.assistant_name || "小助手";
     const customized = Boolean(name && (state.profile.identity?.assistant_name_customized || name !== old || name !== "小助手"));
-    const button = $("[data-save-profile]"); if (button) button.disabled = true;
+    const button = $("[data-save-profile]"); if (button) { button.disabled = true; button.textContent = "保存中…"; }
+    let saved = {};
     try {
-      await api.post("/api/profile", {
+      saved = await api.post("/api/profile", {
         identity: { address: d.get("address"), assistant_name: name || "小助手", assistant_name_customized: customized, role: d.get("role"), language: d.get("language") },
         rules: String(d.get("rules") || "").split("\n").map(x => x.trim()).filter(Boolean),
         habits, lifestyle: d.get("lifestyle") || "",
       });
       state.profile = await api.get("/api/profile");
-      toast("资料已保存，AGENTS.md 已自动生成", "success");
-      api.post("/api/agents/render").catch(() => {});
+      const t = saved.tiers || {};
+      const tail = "分档内容将在新会话生效";
+      if (t.ok === false) toast(`资料已保存，但人设分档生成失败：${t.error || "未知原因"}（旧档保留）`, "error");
+      else toast(`资料已保存，人设分档已更新，${tail}`, "success");
       render();
     } catch (error) { toast(error.message, "error"); }
-    finally { if (button) button.disabled = false; }
+    finally { if (button) { button.disabled = false; button.textContent = "保存用户与助理"; } }
   });
 }
 function addHabitToDom() {}

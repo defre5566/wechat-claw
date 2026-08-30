@@ -364,9 +364,11 @@ def test_regenerate_tiers_without_model_omits_flag(tmp_path, monkeypatch):
     def fake_run(argv, **k):
         seen["argv"] = argv
         assert "--pure" in argv and "--agent" in argv and "plan" in argv
+        from web.agent_gen import TIER_BUDGET
+        seq = [f"条目{j}" for j in range(TIER_BUDGET[-1])]
         return types.SimpleNamespace(
             stdout=json.dumps({"type": "text", "part": {"text": "\n\n".join(
-                f"===TIER{i}===\n" + "\n".join(f"条目{j}" for j in range(i + 1))
+                f"===TIER{i}===\n" + "\n".join(seq[:TIER_BUDGET[i]])
                 + f"\n===END_TIER{i}===" for i in range(5)
             )}}) + "\n" + json.dumps({"type": "step_finish", "part": {"reason": "stop"}}),
             stderr="",
