@@ -214,3 +214,35 @@ def test_commit_tiers_rolls_back_all_files(tmp_path, monkeypatch):
         raise AssertionError("expected commit failure")
     for fname, content in old.items():
         assert (ins / fname).read_text(encoding="utf-8") == content
+
+
+def test_commit_survives_exdev_environment(tmp_path, monkeypatch):
+    """复刻部署机 EXDEV 场景：staging 在 tmpfs、数据根在磁盘。
+    修复后所有 replace 均为同目录（.commit.tmp），模拟的跨设备 rename 不应触发。"""
+    import os as os_mod
+    import shutil as sh
+    import bridge.config as cfg
+    from web import agent_gen as ag
+
+    real_replace = os_mod.replace
+    exdev_hits = []
+
+    def fake_replace(src, dst):
+        src_s, dst_s = str(src), str(dst)
+        # 模拟跨设备：staging(/tmp) → 数据根 的旧式 rename 会命中；同盘 tmp 不命中
+        if "staging" in str(src).replace("/staging/", "/") and ".commit.tmp" not in src_s and ".restore.tmp" not in src_s and ".off" not in src_s and "backup" not in src_s and "wc-tiers" in src_s:
+            exdev_hits.append(src_s)
+            raise OSError(18, "Invalid cross-device link")
+        return real_replace(src, dst)
+
+    ins = tmp_path / "instructions"
+    monkeypatch.setattr(ag, "INSTRUCTIONS_DIR", ins)
+    staging = tmp_path / "staging"
+    (staging / "instructions").mkdir(parents=True)
+    payload = {f"tier{i}": [f"新{j}" for j in range(i + 1)] for i in range(5)}
+    monkeypatch.setattr(cfg, "get", lambda *_: "test/model")
+    ag._commit_tiers(staging, payload)
+    assert exdev_hits == [], "提交路径出现跨设备 os.replace（应经 _atomic_put 同盘 tmp+replace）"
+    assert (ins / "tier-current.md").read_text(encoding="utf-8") == (
+        ins / "tier0.md").read_text(encoding="utf-8")
+    assert (ins / "tier4.md").read_text(encoding="utf-8") == "新0\n新1\n新2\n新3\n新4\n"

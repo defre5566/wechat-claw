@@ -314,8 +314,20 @@ def _restore_unexpected_tier_writes(snapshot: dict[str, bytes | None]) -> bool:
     return changed
 
 
+def _atomic_put(src: Path, target: Path) -> None:
+    """copyfile 到目标同目录临时文件后同盘 os.replace——
+    staging（tmpfs/%TEMP%）与数据根（磁盘）可能跨设备，直接 os.replace 必报 EXDEV
+    （部署机实测 [Errno 18]）；同盘 tmp+replace 全平台安全。"""
+    tmp = target.with_suffix(target.suffix + ".commit.tmp")
+    shutil.copyfile(src, tmp)
+    os.replace(tmp, target)
+
+
 def _commit_tiers(staging: Path, payload: dict[str, list[str]]) -> None:
-    """事务提交 tier0~4 与 tier-current；中途失败恢复提交前的六个文件。"""
+    """事务提交 tier0~4 与 tier-current；中途失败恢复提交前的六个文件。
+
+    提交与回滚均经 _atomic_put（同盘 tmp+replace），staging 与数据根跨设备不炸。
+    """
     INSTRUCTIONS_DIR.mkdir(parents=True, exist_ok=True)
     staged = staging / "instructions"
     backup = staging / "backup"
@@ -334,14 +346,14 @@ def _commit_tiers(staging: Path, payload: dict[str, list[str]]) -> None:
     )
     try:
         for fname in targets:
-            os.replace(staged / fname, INSTRUCTIONS_DIR / fname)
+            _atomic_put(staged / fname, INSTRUCTIONS_DIR / fname)
     except Exception:
         for fname in targets:
             target = INSTRUCTIONS_DIR / fname
             old = backup / fname
             try:
                 if fname in existed:
-                    os.replace(old, target)
+                    _atomic_put(old, target)
                 elif target.exists():
                     target.unlink()
             except OSError:
