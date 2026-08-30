@@ -360,9 +360,10 @@ class BridgeCore:
 
         返回码约定（定稿 B）：0=自答（stdout 即回话文本）/ 3=转 agent / 1=业务失败 / 2=引擎级异常。
         """
-        script = MODULES_DIR / name / f"{name}_worker.py"
-        if not script.is_file():
-            log.error(f"[inbound] 模块脚本不存在: {script}")
+        from bridge.paths import resolve_worker_path
+        script = resolve_worker_path(MODULES_DIR / name, name)
+        if script is None:
+            log.error(f"[inbound] 模块脚本不存在: {MODULES_DIR / name / f'{name}_worker.py'}")
             return 2, ""
         cmd = [sys.executable, str(script), "--inbound", text, "--conversation", conversation_id]
         try:

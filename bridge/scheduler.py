@@ -173,8 +173,11 @@ async def run_module(name: str, args: list[str] | None = None) -> int:
         _integrity_alert(name, why)
         return 2
     script = MODULES_DIR / name / f"{name}_worker.py"
-    if not script.is_file():
-        log.error(f"[sched] 模块脚本不存在: {script}")
+    from bridge.paths import resolve_worker_path
+    script = resolve_worker_path(MODULES_DIR / name, name)
+    if script is None:
+        log.error(f"[sched] 模块脚本不存在: {MODULES_DIR / name / f'{name}_worker.py'}")
+        _worker_missing_alert(name)
         return 2
     cmd = [sys.executable, str(script)] + (args or [])
     # 注入 PYTHONPATH：worker 脚本 sys.path 只有脚本目录+modules/（todo_worker 注入 parent.parent），
@@ -215,6 +218,23 @@ def _integrity_alert(name: str, why: str) -> None:
     try:
         from modules.common.log import log_event
         log_event("CRIT", name, "integrity_fail", why)
+    except Exception:
+        pass  # 事件日志失败不阻塞调度主流程
+
+
+_worker_missing_alerted: dict[str, str] = {}  # 模块 → 当日日期（worker 缺失告警每日去重）
+
+
+def _worker_missing_alert(name: str) -> None:
+    """worker 脚本缺失告警：引擎侧问题（非模块 bug），每日每模块至多一条防刷屏。"""
+    from datetime import date
+    today = date.today().isoformat()
+    if _worker_missing_alerted.get(name) == today:
+        return
+    _worker_missing_alerted[name] = today
+    try:
+        from modules.common.log import log_event
+        log_event("ERROR", name, "worker_missing", "模块 worker 脚本缺失，该模块调度将持续失败（引擎级）")
     except Exception:
         pass  # 事件日志失败不阻塞调度主流程
 

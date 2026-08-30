@@ -438,11 +438,18 @@ def _log_match(line: str, level: str, module: str, keyword: str) -> bool:
 def logs_tail(app, body: dict | None = None) -> dict:
     """日志尾部 + 过滤：level/module/keyword（正则子串，大小写不敏感 level）。"""
     body = body or {}
-    n = int(body.get("tail", 200))
+    try:
+        n = int(body.get("tail", 200))
+    except (TypeError, ValueError):
+        n = 200
+    n = max(1, min(n, 2000))
     level = str(body.get("level", "")).strip()
     module = str(body.get("module", "")).strip()
     keyword = str(body.get("keyword", "")).strip()
-    log_file = DEPLOY_ROOT / "logs" / "system.log"
+    # 日志真源 = 数据根 logs/system.log（bridge/模块写这里；exe 形态下 DEPLOY_ROOT
+    # 与数据根分离，用程序根会读错路径——issue #7）
+    from bridge.config import WORK_ROOT
+    log_file = WORK_ROOT / "logs" / "system.log"
     lines = []
     if log_file.is_file():
         try:
