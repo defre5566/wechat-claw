@@ -280,7 +280,16 @@ function bind() {
     } catch (err) { toast(err.message, "error"); }
     finally { tg.disabled = false; }
   });
-  $$('[data-remove-card]').forEach(b => b.onclick = () => { const node = b.closest("[data-plugin-card]"); if (node) node.remove(); const next = cards().filter(x => x !== b.dataset.removeCard); localStorage.setItem(CARDS_KEY, JSON.stringify(next)); toast("卡片已移除"); });
+  // 卡片移除走事件委托（issue #6）：动态添加的卡片无需重新 bind 即可移除
+  document.addEventListener("click", e => {
+    const b = e.target.closest("[data-remove-card]");
+    if (!b) return;
+    const node = b.closest("[data-plugin-card]");
+    if (node) node.remove();
+    const next = cards().filter(x => x !== b.dataset.removeCard);
+    localStorage.setItem(CARDS_KEY, JSON.stringify(next));
+    toast("卡片已移除");
+  });
   $$('[data-locate]').forEach(b => b.onclick = () => locateCity());
   $$('[data-source-refresh]').forEach(b => b.onclick = async () => { b.disabled = true; try { const d = await api.post("/api/admin/sources/refresh", { id: b.dataset.sourceRefresh }); if (d.ok) { state.sources = (await api.get("/api/admin/sources")).sources || []; render(); toast("模块源已刷新", "success"); } else { toast(d.error || "刷新失败", "error"); } } catch (e) { toast(e.message, "error"); } finally { b.disabled = false; } });
   $$('[data-source-remove]').forEach(b => b.onclick = async () => { if (!confirm("确定删除这个模块源？")) return; try { await api.post("/api/admin/sources/remove", { id: b.dataset.sourceRemove }); state.sources = (await api.get("/api/admin/sources")).sources || []; render(); toast("模块源已删除", "success"); } catch (e) { toast(e.message, "error"); } });
