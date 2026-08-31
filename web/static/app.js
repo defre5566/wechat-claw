@@ -372,6 +372,20 @@ function openModal(name) {
         if (f.type === "list") {
           return `<label class="field">${esc(f.label)}<textarea data-key="${esc(key)}" data-type="list" rows="4">${esc(Array.isArray(val) ? val.join("\n") : String(val))}</textarea>${hint}<small>每行一项</small></label>`;
         }
+        if (f.type === "select") {
+          // 模型候选动态注入：options 缺失或空 → 回退文本框（可手填 provider/model）
+          const opts = f.options || [];
+          if (!opts.length) {
+            return `<label class="field">${esc(f.label)}<input data-key="${esc(key)}" value="${esc(val)}" placeholder="provider/model（留空 = 默认）">${hint}</label>`;
+          }
+          const optsHtml = [`<option value="">（默认）</option>`]
+            .concat(opts.map(m => `<option value="${esc(m)}"${String(m) === String(val) ? " selected" : ""}>${esc(m)}</option>`))
+            .join("");
+          // 已保存值不在候选（自定义模型/候选池漂移）→ 追加当前值选项，防静默丢失展示
+          const extra = (val && opts.indexOf(String(val)) < 0)
+            ? `<option value="${esc(val)}" selected>${esc(val)}（当前）</option>` : "";
+          return `<label class="field">${esc(f.label)}<select data-key="${esc(key)}">${optsHtml}${extra}</select>${hint}</label>`;
+        }
         return `<label class="field">${esc(f.label)}<input data-key="${esc(key)}" value="${esc(val)}">${hint}</label>`;
       };
       const node = modal("高级运行配置", `<div class="field-group">${(schema.schema || []).map(g => `<h3 class="adv-group">${esc(g.title)}</h3>${(g.fields || []).map(f => advField(f, g.group)).join("")}`).join("")}<div class="modal-actions"><button class="btn btn-primary btn-sm" data-adv-save>保存设置</button></div></div>`);
@@ -451,18 +465,21 @@ function openModuleSettings(name) {
         input = `<input data-key="${esc(f.key)}" data-type="string" value="${esc(val)}"${num}${f.min != null && f.type === "number" ? ` min="${esc(f.min)}"` : ""}${f.max != null && f.type === "number" ? ` max="${esc(f.max)}"` : ""}>`;
       }
       const cond = f.show_when ? JSON.stringify(f.show_when) : "";
-      return `<div class="field" data-show-when='${esc(cond)}'>${esc(f.label)}${f.desc ? `<small>${esc(f.desc)}</small>` : ""}${input}</div>`;
+      const svc = f.show_when_service || "";
+      return `<div class="field" data-show-when='${esc(cond)}' data-show-when-service="${esc(svc)}">${esc(f.label)}${f.desc ? `<small>${esc(f.desc)}</small>` : ""}${input}</div>`;
     };
     const groups = (module.settings_schema || []);
     const body = groups.length ? groups.map(g =>
       `<div class="setting-group"><h3>${esc(g.section || "")}</h3>${g.desc ? `<p class="modal-note">${esc(g.desc)}</p>` : ""}${(g.fields || []).map(fieldHtml).join("")}</div>`).join("")
       : '<p class="modal-note">这个模块没有可配置项。</p>';
-    const node = modal(`${esc(name)} 设置`, `<p class="modal-note">${esc(module.purpose || "暂无描述")}</p>${body}<div class="modal-actions"><button class="btn btn-primary btn-sm" data-module-save>保存设置</button></div>`);
-    // show_when 条件显示：字段值变化联动显隐（不满足条件的字段不提交，后端也会丢弃）
+    const node = modal(`${esc(name)} 设置`, `${body}<div class="modal-actions"><button class="btn btn-secondary btn-sm" data-module-reset>恢复默认</button><button class="btn btn-primary btn-sm" data-module-save>保存设置</button></div>`);
+    // show_when 条件显示 + show_when_service 服务显隐：联动判定（不满足条件的字段不提交，后端也会丢弃）
     const applyShowWhen = () => {
       $$("[data-show-when]", node).forEach(el => {
+        const svc = el.dataset.showWhenService;
+        const serviceOk = !svc || (module.location_services || []).includes(svc);
         const cond = el.dataset.showWhen ? JSON.parse(el.dataset.showWhen) : null;
-        if (!cond || Object.keys(cond).length === 0) { el.style.display = ""; return; }
+        if (!cond || Object.keys(cond).length === 0) { el.style.display = serviceOk ? "" : "none"; return; }
         const ok = Object.entries(cond).every(([k, v]) => {
           const src = node.querySelector(`[data-key="${k}"]`);
           if (!src) return false;
@@ -471,7 +488,7 @@ function openModuleSettings(name) {
             : String(src.value);
           return sv === String(v);
         });
-        el.style.display = ok ? "" : "none";
+        el.style.display = (ok && serviceOk) ? "" : "none";
       });
     };
     const collectChips = holder => $$("[data-choice-value]", holder).filter(c => c.classList.contains("chip-on")).map(c => c.dataset.choiceValue);
@@ -497,6 +514,22 @@ function openModuleSettings(name) {
     });
     $$("[data-type='select']", node).forEach(s => s.addEventListener("change", applyShowWhen));
     applyShowWhen();
+    // 恢复默认：各字段回 f.default 并重渲染显隐，不落盘（等用户再点保存）
+    const applyDefaults = () => {
+      (module.settings_schema || []).forEach(g => (g.fields || []).forEach(f => {
+        const el = node.querySelector(`[data-key="${f.key}"]`);
+        if (!el) return;
+        const d = f.default ?? "";
+        if (el.dataset.type === "boolean") el.classList.toggle("on", d === true || d === "true");
+        else if (el.dataset.type === "choice") {
+          const def = Array.isArray(d) ? d : (d ? String(d).split(/[,，]/).filter(Boolean) : []);
+          $$("[data-choice-value]", el).forEach(c => c.classList.toggle("chip-on", def.includes(c.dataset.choiceValue)));
+        } else if (el.dataset.type === "tags") el.value = Array.isArray(d) ? d.join("\n") : String(d);
+        else el.value = d;
+      }));
+      applyShowWhen();
+    };
+    $("[data-module-reset]", node).onclick = applyDefaults;
     $("[data-module-save]", node).onclick = async () => {
       const settings = {};
       $$("[data-key]", node).forEach(x => {

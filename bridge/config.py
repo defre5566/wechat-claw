@@ -102,6 +102,7 @@ DEFAULTS_USER: dict = {
     "acp": {
         "command": "opencode",
         "port": 45678,
+        "model": "",  # 空 = 不指定（opencode 部署默认模型）；填 provider/model 名（web 高级设置可切）
     },
     "file_send": {
         "default_dirs": [],  # 默认空：直发目录由用户自己填（260830 定案，未被填的路径走 gate）

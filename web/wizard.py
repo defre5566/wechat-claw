@@ -232,6 +232,7 @@ ROUTES = {
     ("POST", "/api/profile/avatar"): _h("admin", "avatar_set", True),
     ("POST", "/api/profile/avatar/undo"): _h("admin", "avatar_undo", True),
     ("GET", "/api/admin/schema"): _h("admin", "schema_get", True),
+    ("GET", "/api/admin/models"): _h("admin", "models_list", True),
     ("GET", "/api/admin/settings"): _h("admin", "settings_get", True),
     ("POST", "/api/admin/settings"): _h("admin", "settings_set", True),
     ("GET", "/api/admin/autostart"): _h("admin", "autostart_get", True),

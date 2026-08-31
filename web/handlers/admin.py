@@ -371,10 +371,61 @@ def optimize_persona(app, body: dict | None = None) -> dict:
 
 # ---------- 用户配置（config.yaml 用户段） ----------
 
+_MODELS_CACHE: list | None = None
+_MODELS_CACHE_TS: float = 0.0
+_MODELS_TTL = 300  # 候选列表缓存 5 分钟（模型池变化低频，避免每次打开都跑子进程）
+
+
+def _fetch_opencode_models(max_sec: float = 10.0) -> list[str]:
+    """跑 `opencode models` 拿候选模型列表；失败/超时返回 [].
+
+    空列表时前端不渲染下拉，仅显示文本框（schema hint 已说明可手填 provider/model）。
+    """
+    import subprocess
+    import time as _time
+    from bridge.config import resolve_opencode, no_window_flags
+    binary = resolve_opencode()
+    if not binary:
+        return []
+    try:
+        r = subprocess.run([str(binary), "models"],
+                           capture_output=True, text=True,
+                           timeout=max_sec, creationflags=no_window_flags())
+    except Exception:  # noqa: BLE001 模型列表失败不阻塞配置页
+        return []
+    if r.returncode != 0:
+        return []
+    out = []
+    for ln in (r.stdout or "").splitlines():
+        name = ln.strip()
+        if name and not name.startswith("#"):
+            out.append(name)
+    return out
+
+
+def models_list(app, body: dict | None = None) -> dict:
+    """模型候选列表（缓存 5 分钟）：schema_get 注入 options 与前端复用同一来源。"""
+    global _MODELS_CACHE, _MODELS_CACHE_TS
+    import time as _time
+    if _MODELS_CACHE is None or _time.monotonic() - _MODELS_CACHE_TS > _MODELS_TTL:
+        _MODELS_CACHE = _fetch_opencode_models()
+        _MODELS_CACHE_TS = _time.monotonic()
+    return {"ok": True, "models": list(_MODELS_CACHE)}
+
+
 def schema_get(app, body: dict | None = None) -> dict:
-    """返回 config 用户段 schema（前端按此渲染高级设置表单）。"""
+    """返回 config 用户段 schema（前端按此渲染高级设置表单）。
+
+    acp.model 为动态 select：options 经 opencode models 注入（缓存 5 分钟），
+    探测失败则注入空列表（前端回退文本框）。
+    """
     from web.schema.config_schema import get_schema
-    return {"ok": True, "schema": get_schema()}
+    schema = get_schema()
+    for group in schema:
+        for f in group.get("fields") or []:
+            if f.get("key") == "model" and group["group"] == "acp":
+                f["options"] = models_list(app).get("models") or []
+    return {"ok": True, "schema": schema}
 
 
 def settings_get(app, body: dict | None = None) -> dict:

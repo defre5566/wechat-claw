@@ -23,6 +23,9 @@ CONFIG_SCHEMA: list[dict] = [
             {"key": "port", "label": "端口", "type": "number",
              "default": 45678, "min": 1, "max": 65535,
              "hint": "opencode ACP 子进程端口（避免与 4096/8650/9898 冲突）"},
+            {"key": "model", "label": "渲染模型", "type": "select",
+             "default": "",
+             "hint": "推送渲染/索引/人设优化使用的模型；留空用 opencode 部署默认。候选经 opencode models 动态注入（schema_get 时填充 field.options）"},
         ],
     },
     {
@@ -93,6 +96,9 @@ def validate_settings(settings: dict) -> dict:
                     errors.append(f"{gname}.{f['key']} 必须为布尔值")
                     continue
             elif ftype in ("text", "readonly"):
+                val = str(val)
+            elif ftype == "select":
+                # 候选是动态的（opencode models），不在此强校验；空串表示"不指定"合法
                 val = str(val)
             else:
                 continue
