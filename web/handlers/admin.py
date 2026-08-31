@@ -695,6 +695,11 @@ def modules_toggle(app, body: dict | None = None) -> dict:
         signal.write_text(_json.dumps(entries, ensure_ascii=False) + "\n", encoding="utf-8")
     except Exception:
         pass
+    # job 登记失败随 toggle 响应浮出（批次 A 漏取——save 端点有、toggle 没有）
+    from modules.register import take_job_error
+    job_err = take_job_error(name)
+    if job_err:
+        return {"ok": True, "job_error": f"模块已{'启用' if enabled else '停用'}，但 agent 任务登记失败：{job_err}"}
     return {"ok": True}
 
 
