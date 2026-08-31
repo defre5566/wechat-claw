@@ -30,6 +30,7 @@ RENDER_PROMPT = """你是微信助手的播报渲染器。把下面的推送素�
 
 要求：
 - 素材已包含全部信息，按素材条目如实播报，不要增加素材之外的信息，也不要遗漏条目
+- 保持素材的自然段结构，段落之间用空行分隔；不要把多条内容挤成一段，也不要自行拆散条目
 - 不要使用任何工具或文件操作；不要解释；不要引号
 - 直接输出最终文本
 素材：
@@ -54,7 +55,7 @@ def _clean_output(raw: str) -> str:
     仅 FUSE_LEN 兜底（防模型复读机式跑飞，正常输出不可触达）。"""
     lines = [ln.strip() for ln in (raw or "").splitlines()]
     keep = [ln for ln in lines if ln and not ln.startswith(">")]
-    text = " ".join(keep).strip()
+    text = "\n".join(keep).strip()
     if len(text) > FUSE_LEN:
         text = text[: FUSE_LEN - 1] + "…"
     return text
