@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .config import get, resolve_path
+from .config import DATA_ROOT, get, resolve_path
 
 HOME = Path.home()
 
@@ -61,6 +61,11 @@ def classify(path: str | Path) -> str:
     for d in REJECT_DIRS:
         if _is_within(target, d):
             return "reject"
+    # 模块数据区产物内置直发（平台级规则，260830 定案）：模块自己生成、产品自己
+    # 投递的产物（简报 HTML 等），不经微信确认；区内的 token/密钥已被上方 reject 拦截
+    modules_data = DATA_ROOT / "modules" / "modules_data"
+    if _is_within(target, modules_data):
+        return "default"
     for d in DEFAULT_ALLOW_DIRS:
         if _is_within(target, d):
             return "default"

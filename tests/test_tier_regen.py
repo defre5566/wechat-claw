@@ -258,3 +258,34 @@ def test_commit_survives_exdev_environment(tmp_path, monkeypatch):
     assert (ins / "tier-current.md").read_text(encoding="utf-8") == (
         ins / "tier0.md").read_text(encoding="utf-8")
     assert (ins / "tier4.md").read_text(encoding="utf-8") == "新0\n新1\n新2\n新3\n新4\n"
+
+
+def test_parse_tier_output_tolerates_selfcheck_tail():
+    """部署实测：模型受【自查】条款诱导在末尾追加 "---\n自查确认：…"——尾段容错忽略。"""
+    import web.agent_gen as ag
+    good = _protocol_output(_good_files())
+    assert ag._parse_tier_output(good + "\n---\n自查确认：五档行数 1/2/4/5/8 全部正确。") is not None
+    assert ag._parse_tier_output(good + "\n自查确认：全部正确。") is not None
+    assert ag._parse_tier_output(good + "\n以下是无关的长文本内容，不应被接受。") is None  # 其他尾随仍拒
+
+
+def test_check_instructions_wiring_uses_tier_budget(tmp_path, monkeypatch, caplog):
+    """启动自查按 TIER_BUDGET 校验行数（批Ⅶ 预算 [1,2,4,5,8]，旧 i+1 误报 bug 回归锚）。"""
+    import logging
+    import bridge.main as m
+    import web.agent_gen as ag
+
+    wiring = m.BridgeCore.__new__(m.BridgeCore)
+    ins = tmp_path / "instructions"
+    ins.mkdir()
+    budget = ag.TIER_BUDGET
+    for i in range(5):
+        (ins / f"tier{i}.md").write_text(
+            "\n".join(f"条目{j}" for j in range(budget[i])) + "\n", encoding="utf-8")
+    (ins / "tier-current.md").write_text("cur", encoding="utf-8")
+    (tmp_path / "opencode.jsonc").write_text(
+        '{"instructions": ["instructions/tier-current.md"]}', encoding="utf-8")
+    monkeypatch.setattr(m, "WORKDIR", tmp_path)
+    with caplog.at_level(logging.WARNING, logger="wechat-bridge"):
+        wiring._check_instructions_wiring()
+    assert not [r for r in caplog.records if "应为" in r.message]  # 全预算匹配，零误报

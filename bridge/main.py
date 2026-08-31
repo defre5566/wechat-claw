@@ -448,6 +448,7 @@ class BridgeCore:
     def _check_instructions_wiring(self) -> None:
         """启动只读自查：配置接线和 tier 文件缺失时告警，不自动修改用户文件。"""
         try:
+            from web.agent_gen import TIER_BUDGET
             cfg_file = WORKDIR / "opencode.jsonc"
             if not cfg_file.is_file():
                 return  # 未配置形态（不放置也能运行），不提示
@@ -478,10 +479,10 @@ class BridgeCore:
                 except OSError as e:
                     log.warning("[config] 读取 %s 失败：%s", tier, e)
                     continue
-                if count != i + 1:
+                if count != TIER_BUDGET[i]:
                     log.warning(
                         "[config] %s 非空行数=%s，应为 %s——tier 人设可能不完整",
-                        tier.name, count, i + 1,
+                        tier.name, count, TIER_BUDGET[i],
                     )
         except Exception as e:  # noqa: BLE001 自查失败不阻塞启动
             log.warning(f"[config] instructions 接线自查失败: {e}")

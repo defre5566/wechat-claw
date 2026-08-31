@@ -104,10 +104,7 @@ DEFAULTS_USER: dict = {
         "port": 45678,
     },
     "file_send": {
-        "default_dirs": [
-            "~/文档", "~/下载", "~/桌面", "~/图片",
-            "~/音乐", "~/视频", "~/公共", "inbox",   # inbox = <数据根>/inbox
-        ],
+        "default_dirs": [],  # 默认空：直发目录由用户自己填（260830 定案，未被填的路径走 gate）
         "reject_dirs": [".config", "agent-SDK", "~/.wechat-agent-sdk",
                         "~/.ssh", "~/.gnupg"],  # .config = <数据根>/.config；agent-SDK = <数据根> 下微信 SDK 凭证目录
         "reject_name_re": "token|secret|credential|private|accounts\\.json|anniversaries\\.json\\.enc",

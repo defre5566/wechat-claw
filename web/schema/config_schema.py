@@ -30,9 +30,8 @@ CONFIG_SCHEMA: list[dict] = [
         "title": "文件发送规则",
         "fields": [
             {"key": "default_dirs", "label": "直发目录", "type": "list",
-             "default": ["~/文档", "~/下载", "~/桌面", "~/图片",
-                         "~/音乐", "~/视频", "~/公共", "inbox"],
-             "hint": "每行一个目录；这些目录下的文件微信发送免确认"},
+             "default": [],
+             "hint": "每行一个目录；这些目录下的文件微信发送免确认。默认为空：未填写的路径发送时走微信确认（gate）"},
             {"key": "reject_dirs", "label": "拒绝目录", "type": "list",
              "default": [".config", "agent-SDK", "~/.wechat-agent-sdk",
                          "~/.ssh", "~/.gnupg"],

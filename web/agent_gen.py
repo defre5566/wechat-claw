@@ -206,7 +206,8 @@ TIER_PROMPT = """你是 wechat-claw 助理人设编辑器。任务：把用户�
 - 只允许重组用户输入的信息，禁止虚构新的性格细节、经历或能力承诺
 - 输入信息不足以撑满某档时，可用中性的通用措辞补位（如"回应务实简短"），不得编造
 
-【自查】输出前逐一核对五个区块的条数是否为 1/2/4/5/8，并核对高档包含低档的全部前缀。
+【自查】核对在输出前默内完成（五个区块条数 1/2/4/5/8、高档包含低档前缀），
+不要把自查过程写进回答。
 """
 
 TIER_RUN_TIMEOUT = 120  # 与 admin.optimize_persona 同口径
@@ -247,7 +248,10 @@ def _parse_tier_output(raw: str) -> dict[str, list[str]] | None:
             return None
         result[f"tier{i}"] = lines
         cursor += marker.end()
-    if clean[cursor:].strip():
+    tail = clean[cursor:].strip()
+    # 尾段容错（260830 部署实测：模型受【自查】条款诱导，在末尾追加 "---\n自查确认：…"）——
+    # 仅这类说明性尾随块忽略；其余尾随内容仍整体拒绝
+    if tail and not re.fullmatch(r"(?:-{3,}\s*)?(?:自查[^\n]*)?", tail):
         return None
     for i in range(1, 5):
         if result[f"tier{i}"][:TIER_BUDGET[i - 1]] != result[f"tier{i - 1}"]:
