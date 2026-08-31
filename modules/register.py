@@ -565,13 +565,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if reissue_token(argv[1]) else 1
 
     if argv[0] == "--sync-jobs" and len(argv) >= 2:
-        from bridge.jobs import sync_jobs
-        r = sync_jobs(argv[1])
+        from bridge.jobs import sync_module_jobs
+        r = sync_module_jobs(argv[1])  # 走统一联动入口：phase 级 + 模板级开关检查
+        if r.get("skipped"):
+            print(f"[register] sync-jobs: {argv[1]} 无 job 声明，跳过")
+            return 0
         if not r["ok"]:
             print(f"[register] sync-jobs: {r.get('error', '失败')}")
             return 1
-        print(f"[register] {argv[1]} job 已渲染: {r['job']['title']} @ {r['job']['schedule']}")
-        print(r.get("install_hint", ""))
+        if "job" in r:
+            print(f"[register] {argv[1]} job 已渲染: {r['job']['title']} @ {r['job']['schedule']}")
+            print(r.get("install_hint", ""))
+        else:
+            print(f"[register] {argv[1]} 开关为关，job 已注销: {r.get('removed', [])}")
         return 0
 
     # 注册/更新（G1 分流：已存在模块 → update_module 不换 token；新模块 → register_module 发卡）

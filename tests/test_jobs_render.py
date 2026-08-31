@@ -258,3 +258,94 @@ def test_sync_jobs_consumes_timers_field(tmp_path, monkeypatch):
     r = jobs.sync_jobs("Planner")
     assert r["ok"], r
     assert "carrier=" in r["install_hint"] and "Planner-morning-briefing" in r["install_hint"]
+
+
+# ---------- 模板级 enabled_field（任务级业务开关，260831 devlog D1/D3） ----------
+
+_TPL = {"name": "早报简报", "title": "早报简报", "slug": "morning-briefing",
+        "phase": "morning", "offset_min": 5, "output_dir": "briefing",
+        "prompt": "生成简报 {output_path}"}
+
+
+def test_sync_module_jobs_template_field_disabled_unregisters(tmp_path, monkeypatch):
+    """任务单 enabled_field=false（phase 级开着）→ 注销（任务开关归任务单）。"""
+    _mk_module(tmp_path, template={**_TPL, "enabled_field": "briefing_on"},
+               settings={"planner_on": True, "briefing_on": False, "morning_time": "08:30"})
+    _setup(tmp_path, monkeypatch)
+    calls, installed = {}, []
+
+    def fake_uninstall(module):
+        calls["module"] = module
+        return {"ok": True, "removed": ["Planner-morning-briefing"]}
+
+    monkeypatch.setattr("bridge.opencode_jobs.install_job", lambda **kw: installed.append(kw) or {"ok": True})
+    monkeypatch.setattr("bridge.opencode_jobs.uninstall_job", fake_uninstall)
+    r = jobs.sync_module_jobs("Planner")
+    assert r["ok"]
+    assert calls["module"] == "Planner"
+    assert installed == []                                      # 未登记
+
+
+def test_sync_module_jobs_template_field_enabled_installs(tmp_path, monkeypatch):
+    """任务单 enabled_field=true → 正常登记。"""
+    _mk_module(tmp_path, template={**_TPL, "enabled_field": "briefing_on"},
+               settings={"planner_on": True, "briefing_on": True, "morning_time": "08:30"})
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr("bridge.opencode_jobs.install_job",
+                        lambda **kw: {"ok": True, "slug": "Planner-morning-briefing"})
+    r = jobs.sync_module_jobs("Planner")
+    assert r["ok"] and not r.get("skipped")
+
+
+def test_sync_module_jobs_template_field_missing_installs(tmp_path, monkeypatch):
+    """任务单 enabled_field 指向的设置键缺失（空白≠关）→ 仍登记（严格 is False 语义）。"""
+    _mk_module(tmp_path, template={**_TPL, "enabled_field": "briefing_on"},
+               settings={"planner_on": True, "morning_time": "08:30"})
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr("bridge.opencode_jobs.install_job",
+                        lambda **kw: {"ok": True, "slug": "Planner-morning-briefing"})
+    r = jobs.sync_module_jobs("Planner")
+    assert r["ok"] and not r.get("skipped")
+
+
+def test_sync_module_jobs_phase_gate_takes_precedence(tmp_path, monkeypatch):
+    """phase 级=false（任务单级=true）→ 注销（AND 判定，任一关即注销）。"""
+    _mk_module(tmp_path, template={**_TPL, "enabled_field": "briefing_on"},
+               settings={"planner_on": False, "briefing_on": True, "morning_time": "08:30"})
+    _setup(tmp_path, monkeypatch)
+    calls, installed = {}, []
+
+    def fake_uninstall(module):
+        calls["module"] = module
+        return {"ok": True, "removed": []}
+
+    monkeypatch.setattr("bridge.opencode_jobs.install_job", lambda **kw: installed.append(kw) or {"ok": True})
+    monkeypatch.setattr("bridge.opencode_jobs.uninstall_job", fake_uninstall)
+    r = jobs.sync_module_jobs("Planner")
+    assert r["ok"] and calls["module"] == "Planner" and installed == []
+
+
+def test_cli_sync_jobs_routes_through_gate(tmp_path, monkeypatch, capsys):
+    """CLI --sync-jobs 改走 sync_module_jobs（带开关检查）：skipped/注销/登记三形态。"""
+    from modules import register
+
+    returns: dict = {}
+
+    def fake_sync(name):
+        return returns["v"]
+
+    monkeypatch.setattr("bridge.jobs.sync_module_jobs", fake_sync)
+
+    returns["v"] = {"ok": True, "skipped": True}
+    assert register.main(["--sync-jobs", "Planner"]) == 0
+    assert "无 job 声明" in capsys.readouterr().out
+
+    returns["v"] = {"ok": True, "removed": ["Planner-morning-briefing"]}
+    assert register.main(["--sync-jobs", "Planner"]) == 0
+    assert "已注销" in capsys.readouterr().out
+
+    returns["v"] = {"ok": True, "job": {"title": "早报简报", "schedule": "25 8 * * *"},
+                    "install_hint": "hint-text"}
+    assert register.main(["--sync-jobs", "Planner"]) == 0
+    out = capsys.readouterr().out
+    assert "已渲染" in out and "hint-text" in out

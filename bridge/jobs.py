@@ -286,6 +286,7 @@ def sync_module_jobs(name: str) -> dict:
 
     - 模块无 job_template 声明 → 跳过（skipped=True，不打扰非 agent 型模块）
     - 声明了但对应 phase 的 enabled_field=false（如 planner_on=false）→ 注销 job
+    - job 模板自身声明 enabled_field=false（任务级业务开关，如 briefing_on）→ 注销 job
     - 否则 → 渲染 + 自动登记（sync_jobs）
     """
     mod_dir = MODULES_DIR / name
@@ -305,6 +306,9 @@ def sync_module_jobs(name: str) -> dict:
             if ef and settings.get(ef) is False:
                 return unregister_jobs(name)
             break
+    ef_t = jt.get("enabled_field")   # 任务单自身开关，与 phase 级叠加 AND 判定
+    if ef_t and settings.get(ef_t) is False:
+        return unregister_jobs(name)
     return sync_jobs(name)
 
 
