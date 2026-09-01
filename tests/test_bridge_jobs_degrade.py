@@ -65,10 +65,16 @@ def _write_job(env, slug="Planner-morning-briefing", module="Planner", carrier="
 # ---------- install_job 降级 ----------
 
 def test_install_job_degrades_on_readonly_systemd(tmp_path, monkeypatch):
-    """platform 载体 OSError（Errno 30 只读等）→ carrier=bridge + job.json 标记。"""
+    """platform 载体 OSError（Errno 30 只读等）→ carrier=bridge + job.json 标记。
+
+    平台适配器按 _platform_kind()：Windows _install_windows_timers /
+    macOS _install_launchd / Linux _install_systemd（各自抛 OSError 都应降级）。
+    """
     import bridge.opencode_jobs as oj
     monkeypatch.setattr("bridge.config.resolve_opencode", lambda: "/usr/bin/opencode")
-    monkeypatch.setattr(oj, "_install_systemd",
+    kinds = {"windows": "_install_windows_timers", "darwin": "_install_launchd"}
+    target = kinds.get(oj._platform_kind(), "_install_systemd")
+    monkeypatch.setattr(oj, target,
                         lambda *a, **k: (_ for _ in ()).throw(OSError(30, "Read-only file system")))
     monkeypatch.setattr(oj, "jobs_dir", lambda: tmp_path / "sched-jobs")
     (tmp_path / "sched-jobs").mkdir(parents=True)

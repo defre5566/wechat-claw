@@ -42,13 +42,21 @@ def resolve_worker_path(mod_dir: Path, name: str) -> Path | None:
 
     大小写兼容（如 Planner → planner_worker.py，与 module_source.verify 内嵌
     逻辑同款——260830 统一为单一真源，scheduler/inbound/module_source 三处共用）。
+    返回路径名取磁盘真实条目（Windows/APFS 大小写不敏感文件系统上 is_file 命中
+    不代表拼接名与磁盘名一致，命令字符串必须用磁盘真名）。
     两者都不存在返回 None（调用方按引擎级异常处理）。
     """
-    direct = mod_dir / f"{name}_worker.py"
-    if direct.is_file():
-        return direct
-    lowered = mod_dir / f"{name.lower()}_worker.py"
-    return lowered if lowered.is_file() else None
+    direct, lowered = f"{name}_worker.py", f"{name.lower()}_worker.py"
+    try:
+        for entry in mod_dir.iterdir():
+            if entry.is_file() and entry.name == direct:
+                return entry
+        for entry in mod_dir.iterdir():
+            if entry.is_file() and entry.name.lower() == lowered:
+                return entry
+    except OSError:
+        return None
+    return None
 
 
 def classify(path: str | Path) -> str:
