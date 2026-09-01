@@ -35,6 +35,17 @@ def _log(msg: str) -> None:
         pass
 
 
+def _ver_tuple(ver: str) -> tuple[int, ...] | None:
+    """版本号解析为整数元组（"0.1.10" → (0, 1, 10)）；无法解析返回 None。
+
+    字符串比较会把 0.1.10 误判为小于 0.1.6（逐字符 '1' < '6'）。
+    """
+    try:
+        return tuple(int(seg) for seg in ver.split(".") if seg)
+    except ValueError:
+        return None
+
+
 def _maybe_seed_data_root() -> None:
     """首启种子化（仅 frozen 形态）：复制平台代码到 DATA_ROOT。"""
     if not getattr(sys, "frozen", False):
@@ -43,11 +54,15 @@ def _maybe_seed_data_root() -> None:
     RES_ROOT = RESOURCE_ROOT
     ver_file = DATA_ROOT_ / ".version"
     local_ver = ver_file.read_text().strip() if ver_file.is_file() else ""
-    if local_ver == VERSION:
-        return
-    if local_ver and local_ver > VERSION:
-        _log(f"[entry] 本地版本 {local_ver} 高于 exe 版本 {VERSION}，跳过复制")
-        return
+    lt, vt = _ver_tuple(local_ver), _ver_tuple(VERSION)
+    if lt is not None and vt is not None:
+        if lt == vt:
+            return
+        if lt > vt:
+            _log(f"[entry] 本地版本 {local_ver} 高于 exe 版本 {VERSION}，跳过复制")
+            return
+    elif local_ver == VERSION:
+        return  # 解析异常时按字符串等值兜底（不等则按更旧处理，重播种幂等）
     for dirname in ("bridge", "modules", "patches", "web", "vendor"):
         src = RES_ROOT / dirname
         if not src.is_dir():

@@ -73,6 +73,50 @@ def test_seed_data_root_same_exe_no_copy(tmp_path, monkeypatch):
     assert data_exe.stat().st_mtime_ns == mtime_before  # 内容相同未重写
 
 
+def test_seed_skip_when_local_newer_multi_digit(tmp_path, monkeypatch):
+    """0.1.10 > 0.1.6 元组比较：本地更高跳复制（字符串比较会误判为更旧→误播种）。"""
+    res_root = tmp_path / "res"
+    (res_root / "bridge").mkdir(parents=True)
+    (res_root / "bridge" / "x.py").write_text("v2", encoding="utf-8")
+    data_root = tmp_path / "data"
+    (data_root / ".version").parent.mkdir(parents=True, exist_ok=True)
+    (data_root / ".version").write_text("0.1.10", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "wechat-claw.exe"))
+    monkeypatch.setattr("entry.DATA_ROOT", data_root)
+    monkeypatch.setattr("entry.RESOURCE_ROOT", res_root)
+    monkeypatch.setattr("entry.VERSION", "0.1.6")
+    monkeypatch.setattr("entry._LOG_FILE", tmp_path / "logs" / "web.log")
+
+    _maybe_seed_data_root()
+
+    assert not (data_root / "bridge" / "x.py").exists()  # 未复制
+    assert (data_root / ".version").read_text(encoding="utf-8") == "0.1.10"  # 未降级覆盖
+
+
+def test_seed_malformed_local_ver_falls_back_equality(tmp_path, monkeypatch):
+    """.version 内容损坏：字节等值兜底返回，不等则按更旧处理（重播种幂等）。"""
+    res_root = tmp_path / "res"
+    (res_root / "bridge").mkdir(parents=True)
+    (res_root / "bridge" / "x.py").write_text("v1", encoding="utf-8")
+    data_root = tmp_path / "data"
+    (data_root / ".version").parent.mkdir(parents=True, exist_ok=True)
+    (data_root / ".version").write_text("garbage", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "wechat-claw.exe"))
+    monkeypatch.setattr("entry.DATA_ROOT", data_root)
+    monkeypatch.setattr("entry.RESOURCE_ROOT", res_root)
+    monkeypatch.setattr("entry.VERSION", "0.1.6")
+    monkeypatch.setattr("entry._LOG_FILE", tmp_path / "logs" / "web.log")
+
+    _maybe_seed_data_root()
+
+    assert (data_root / "bridge" / "x.py").read_text(encoding="utf-8") == "v1"
+    assert (data_root / ".version").read_text(encoding="utf-8") == "0.1.6"  # 已回写正常版本
+
+
 # ---------- _git_clone ZIP 化 ----------
 
 def _zip_bytes(entries: dict[str, bytes]) -> bytes:
