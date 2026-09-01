@@ -7,5 +7,9 @@ readme = "README.md"
 requires-python = ">=3.11"  # CI/构建统一 3.12（测试与打包同 minor）；本地开发 3.14 可跑但以 CI 为准
 license = { text = "MIT" }
 
+[tool.pytest.ini_options]
+faulthandler_timeout = 100
+faulthandler_exit_on_timeout = true
+
 # 依赖唯一真源 = requirements.txt（版本锁死；本仓库不提供 pip 安装，
 # 部署 = venv + 源码运行 bridge.main），此处不重复声明防双源漂移；无 build-system。
