@@ -38,16 +38,16 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=.venv/Scripts/python.exe; else PY=.venv/bin/python; fi
-          "$PY" -m pytest tests/ -q --collect-only | tail -1
+"$PY" -m pytest tests/ -q --collect-only | tail -1
           "$PY" - "$PY" <<'PYEOF'
-          import subprocess, sys
-          py = sys.argv[1]
-          try:
-              r = subprocess.run([py, "-m", "pytest", "tests/", "-q"], timeout=900)
-          except subprocess.TimeoutExpired:
-              sys.exit("PYTEST TIMEOUT 900s")
-          sys.exit(r.returncode)
-          PYEOF
+import subprocess, sys
+py = sys.argv[1]
+try:
+    r = subprocess.run([py, "-m", "pytest", "tests/", "-v"], timeout=600)
+except subprocess.TimeoutExpired:
+    sys.exit("PYTEST TIMEOUT 600s")
+sys.exit(r.returncode)
+PYEOF
       - name: Build
         shell: bash
         run: |
