@@ -21,11 +21,15 @@ def _mk(tmp: Path, module_json: dict | None = None):
     mod_dir.mkdir(parents=True)
     data_dir.mkdir(parents=True)
     (mod_dir / "module.json").write_text(
-        json.dumps(module_json or {"name": "demo"}), encoding="utf-8")
+        json.dumps(module_json or {"name": "demo", "bridge_compat": ["0.1"]}), encoding="utf-8")
     import pytest
     mp = pytest.MonkeyPatch()
     mp.setattr(register, "MODULES_DIR", tmp / "modules")
     mp.setattr(register, "DATA_ROOT", tmp / "modules" / "modules_data")
+    # 启停钩子会写指令索引目录（register → web.agent_gen），一并隔离防泄漏真实数据根
+    import web.agent_gen as ag
+    mp.setattr(ag, "INDEX_DIR", tmp / "instructions" / "index")
+    mp.setattr(ag, "DATA_ROOT", tmp)
     return mod_dir, data_dir, mp
 
 
@@ -33,12 +37,13 @@ def _mk(tmp: Path, module_json: dict | None = None):
 
 def test_set_enabled_writes_settings_json(tmp_path):
     mod_dir, data_dir, _ = _mk(tmp_path)
-    assert register.set_enabled("demo", True)
+    ok, why = register.set_enabled("demo", True)
+    assert ok, why
     mj = json.loads((mod_dir / "module.json").read_text(encoding="utf-8"))
     assert "enabled" not in mj
     sv = json.loads((data_dir / "settings.json").read_text(encoding="utf-8"))
     assert sv["enabled"] is True
-    assert register.set_enabled("demo", False)
+    assert register.set_enabled("demo", False)[0]
     sv = json.loads((data_dir / "settings.json").read_text(encoding="utf-8"))
     assert sv["enabled"] is False
 

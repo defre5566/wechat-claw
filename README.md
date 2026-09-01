@@ -52,7 +52,7 @@ git clone <仓库地址> wechat-claw && cd wechat-claw
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/pip install -e ./vendor/wechat_agent_sdk   # vendor 快照（补丁已预打）
-.venv/bin/python patches/apply_patches.py --check-only  # 期望全部 [SKIP] 已打
+.venv/bin/python patches/apply_patches.py --vendor --check-only  # 期望全部 [SKIP] 已打
 ```
 
 守护进程与扫码登录见下方"基础设置"与 [docs/开发文档-03](docs/开发文档-03-操作手册.md)（Linux systemd / macOS launchd / Windows nssm）。
@@ -63,7 +63,9 @@ python3 -m venv .venv
 环境装配（opencode 安装 / 配置生成 / 扫码登录 / 拉起服务）。
 
 - Linux/macOS：`./wechat-claw`；Windows：`wechat-claw.exe`
-- 用户数据（`.config/`）落在**可执行文件所在目录**，备份 = 打包该目录
+- 用户数据（`.config/`）落在**平台规范数据根**：Windows `%LOCALAPPDATA%\wechat-claw`、
+  Linux `~/.local/share/wechat-claw`、macOS `~/Library/Application Support/wechat-claw`
+  （`WC_DATA_ROOT` 环境变量可覆盖）；备份 = 打包该目录
 - opencode 不捆绑：向导引导安装官方版本
 - 构建：`.venv/bin/python scripts/build.py`（PyInstaller，不能交叉编译，各平台各自构建）
 
@@ -90,8 +92,8 @@ EOF
 
 | 文件 | 作用 |
 |---|---|
-| [AGENTS.md](AGENTS.md) | 对话 agent 系统提示（管理后台"助理人设"经 web/templates/AGENTS.tmpl + agent_gen.py 生成；仓库内为默认模板） |
-| [opencode.jsonc.example](opencode.jsonc.example) | 对话 agent **权限配置**（deny 五项 token/密钥），复制为项目根 `opencode.jsonc` 生效 |
+| [AGENTS.md](AGENTS.md) | 开发环境说明（面向本仓 opencode 开发会话；部署态 agent 指引经 instructions 目录装载，不使用 AGENTS.md） |
+| [opencode.jsonc.example](opencode.jsonc.example) | 对话 agent **权限配置模板**（deny 六项 token/密钥；部署时由向导生成为数据根 `opencode.jsonc` 并追加 instructions 指向） |
 
 ### 4. 守护进程
 

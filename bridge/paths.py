@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .config import get, resolve_path
+from .config import DATA_ROOT, get, resolve_path
 
 HOME = Path.home()
 
@@ -37,6 +37,28 @@ def _is_within(child: Path, parent: Path) -> bool:
         return False
 
 
+def resolve_worker_path(mod_dir: Path, name: str) -> Path | None:
+    """模块 worker 脚本解析：先 {name}_worker.py，回退 {name.lower()}_worker.py。
+
+    大小写兼容（如 Planner → planner_worker.py，与 module_source.verify 内嵌
+    逻辑同款——260830 统一为单一真源，scheduler/inbound/module_source 三处共用）。
+    返回路径名取磁盘真实条目（Windows/APFS 大小写不敏感文件系统上 is_file 命中
+    不代表拼接名与磁盘名一致，命令字符串必须用磁盘真名）。
+    两者都不存在返回 None（调用方按引擎级异常处理）。
+    """
+    direct, lowered = f"{name}_worker.py", f"{name.lower()}_worker.py"
+    try:
+        for entry in mod_dir.iterdir():
+            if entry.is_file() and entry.name == direct:
+                return entry
+        for entry in mod_dir.iterdir():
+            if entry.is_file() and entry.name.lower() == lowered:
+                return entry
+    except OSError:
+        return None
+    return None
+
+
 def classify(path: str | Path) -> str:
     """返回 "default" / "gate" / "reject"。相对路径基于项目根解析（与规则表一致）。"""
     target = resolve_path(path)
@@ -47,6 +69,11 @@ def classify(path: str | Path) -> str:
     for d in REJECT_DIRS:
         if _is_within(target, d):
             return "reject"
+    # 模块数据区产物内置直发（平台级规则，260830 定案）：模块自己生成、产品自己
+    # 投递的产物（简报 HTML 等），不经微信确认；区内的 token/密钥已被上方 reject 拦截
+    modules_data = DATA_ROOT / "modules" / "modules_data"
+    if _is_within(target, modules_data):
+        return "default"
     for d in DEFAULT_ALLOW_DIRS:
         if _is_within(target, d):
             return "default"

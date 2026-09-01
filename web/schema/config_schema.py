@@ -1,7 +1,14 @@
-"""config.yaml 用户段 schema：acp / file_send / crypto。
+"""config.yaml 用户段 schema：acp / file_send。
 
-字段类型：text / number / list（多行文本，每行一项）/ readonly（只读展示）。
+字段类型：text / number / list（多行文本，每行一项）。
 前端按此渲染高级设置表单；后端按此校验提交。
+
+260830 收敛（鑫定案）：
+- crypto 组移除——key_file 是自动生成的内部路径，不是用户配置（改错即隐私数据
+  永久不可解密）；读取逻辑不受影响（bridge.config DEFAULTS_USER 仍供默认值），
+  仅不再暴露为可编辑项
+- update 组迁出——模块自动更新开关归模块页（存储仍是 config.yaml update 段，
+  scheduler/module_source 读取不变，仅 UI 归位）
 """
 from __future__ import annotations
 
@@ -16,6 +23,9 @@ CONFIG_SCHEMA: list[dict] = [
             {"key": "port", "label": "端口", "type": "number",
              "default": 45678, "min": 1, "max": 65535,
              "hint": "opencode ACP 子进程端口（避免与 4096/8650/9898 冲突）"},
+            {"key": "model", "label": "渲染模型", "type": "select",
+             "default": "",
+             "hint": "推送渲染/索引/人设优化使用的模型；留空用 opencode 部署默认。候选经 opencode models 动态注入（schema_get 时填充 field.options）"},
         ],
     },
     {
@@ -23,9 +33,8 @@ CONFIG_SCHEMA: list[dict] = [
         "title": "文件发送规则",
         "fields": [
             {"key": "default_dirs", "label": "直发目录", "type": "list",
-             "default": ["~/文档", "~/下载", "~/桌面", "~/图片",
-                         "~/音乐", "~/视频", "~/公共", "inbox"],
-             "hint": "每行一个目录；这些目录下的文件微信发送免确认"},
+             "default": [],
+             "hint": "每行一个目录；这些目录下的文件微信发送免确认。默认为空：未填写的路径发送时走微信确认（gate）"},
             {"key": "reject_dirs", "label": "拒绝目录", "type": "list",
              "default": [".config", "agent-SDK", "~/.wechat-agent-sdk",
                          "~/.ssh", "~/.gnupg"],
@@ -35,28 +44,7 @@ CONFIG_SCHEMA: list[dict] = [
              "hint": "正则，命中文件名的文件硬拒"},
             {"key": "reject_suffixes", "label": "拒绝扩展名", "type": "list",
              "default": [".key", ".pem", ".p12", ".pfx", ".p8"],
-             "hint": "每行一个扩展名"},
-        ],
-    },
-    {
-        "group": "crypto",
-        "title": "隐私数据",
-        "fields": [
-            {"key": "key_file", "label": "加密密钥路径", "type": "readonly",
-             "default": ".config/crypto.key",
-             "hint": "只读：密钥自动生成，丢失将无法解密已加密的隐私数据"},
-        ],
-    },
-    {
-        "group": "update",
-        "title": "模块自动更新",
-        "fields": [
-            {"key": "auto_enabled", "label": "自动更新", "type": "boolean",
-             "default": True,
-             "hint": "开启后每天定时检查模块源：源有变化即自动更新已装模块（静默，不推送）；模块级开关可单独关闭"},
-            {"key": "check_time", "label": "检查时刻", "type": "text",
-             "default": "04:00",
-             "hint": "每日检查时刻（HH:MM）；源无变化时零开销跳过"},
+             "hint": "每行一个扩展名；收紧后微信端将对命中文件要求确认或拒发"},
         ],
     },
 ]
@@ -97,7 +85,20 @@ def validate_settings(settings: dict) -> dict:
                     errors.append(f"{gname}.{f['key']} 必须为列表")
                     continue
                 val = [str(x) for x in val]
+            elif ftype == "boolean":
+                if isinstance(val, bool):
+                    pass
+                elif val in ("true", "True", 1):
+                    val = True
+                elif val in ("false", "False", 0):
+                    val = False
+                else:
+                    errors.append(f"{gname}.{f['key']} 必须为布尔值")
+                    continue
             elif ftype in ("text", "readonly"):
+                val = str(val)
+            elif ftype == "select":
+                # 候选是动态的（opencode models），不在此强校验；空串表示"不指定"合法
                 val = str(val)
             else:
                 continue

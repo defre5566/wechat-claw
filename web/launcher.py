@@ -39,8 +39,8 @@ def _build_venv() -> None:
     if r.returncode != 0:
         sys.exit("[launcher] venv 创建失败")
     for cmd in (
-        [str(PIP), "install", "-r", str(ROOT / "requirements.txt")],
-        [str(PIP), "install", "-e", str(ROOT / "vendor" / "wechat_agent_sdk")],
+        [str(PIP), "install", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", "-r", str(ROOT / "requirements.txt")],
+        [str(PIP), "install", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", "-e", str(ROOT / "vendor" / "wechat_agent_sdk")],
     ):
         print(f"[launcher] 运行: {' '.join(cmd)}")
         r = subprocess.run(cmd)
@@ -50,11 +50,38 @@ def _build_venv() -> None:
 
 
 def main(argv: list[str]) -> int:
+    # 启动前端口探测：8650 已被监听（旧实例/残留进程）→ 不重复启动，直接开浏览器
+    port = 8650
+    for i, a in enumerate(argv):
+        if a == "--port" and i + 1 < len(argv):
+            port = int(argv[i + 1])
+    if _port_listening(port):
+        print(f"[launcher] 端口 {port} 已有服务在运行（可能残留旧实例），不重复启动，直接打开浏览器")
+        _open_browser(port)
+        return 0
     if not _venv_usable():
         _build_venv()
     wizard = ROOT / "web" / "wizard.py"
     os.execv(str(PY), [str(PY), str(wizard), *argv])
     return 1  # 不可达
+
+
+def _port_listening(port: int) -> bool:
+    """TCP 探测 127.0.0.1:port 是否已在监听（标准库实现，venv 未建也可用）。"""
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _open_browser(port: int) -> None:
+    try:
+        import webbrowser
+        webbrowser.open(f"http://127.0.0.1:{port}/")
+    except Exception:
+        print(f"[launcher] 请手动打开 http://127.0.0.1:{port}/")
 
 
 if __name__ == "__main__":

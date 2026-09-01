@@ -31,7 +31,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from bridge.config import DATA_ROOT, RESOURCE_ROOT
+from bridge.config import DATA_ROOT, RESOURCE_ROOT, no_window_flags
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("WEB_PORT", "8650"))
@@ -121,6 +121,7 @@ class Job:
                 p = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, encoding="utf-8", errors="replace",
+                    creationflags=no_window_flags(),
                 )
                 assert p.stdout is not None
                 # 读线程泵日志（Windows 无 select-pipe，跨平台统一线程方案）
@@ -193,9 +194,7 @@ class WizardApp:
         job = self.jobs.get(name)
         return job.snapshot() if job else None
 
-    def _opencode_done(self, ok: bool) -> None:
-        if ok:
-            self.steps["opencode"] = True
+    
 
 
 APP = WizardApp()
@@ -229,11 +228,19 @@ ROUTES = {
     ("POST", "/api/profile/locate"): _h("admin", "profile_locate", True),
     ("POST", "/api/profile/undo"): _h("admin", "profile_undo", True),
     ("POST", "/api/agents/render"): _h("admin", "agents_render", True),
+    ("POST", "/api/agents/optimize_persona"): _h("admin", "optimize_persona", True),
     ("POST", "/api/profile/avatar"): _h("admin", "avatar_set", True),
     ("POST", "/api/profile/avatar/undo"): _h("admin", "avatar_undo", True),
     ("GET", "/api/admin/schema"): _h("admin", "schema_get", True),
+    ("GET", "/api/admin/models"): _h("admin", "models_list", True),
     ("GET", "/api/admin/settings"): _h("admin", "settings_get", True),
     ("POST", "/api/admin/settings"): _h("admin", "settings_set", True),
+    ("GET", "/api/admin/autostart"): _h("admin", "autostart_get", True),
+    ("POST", "/api/admin/autostart"): _h("admin", "autostart_set", True),
+    ("GET", "/api/admin/status"): _h("admin", "status_get", True),
+    ("POST", "/api/admin/start"): _h("admin", "start_bridge", True),
+    ("GET", "/api/admin/version"): _h("admin", "version_get", True),
+    ("POST", "/api/admin/update/gitpull"): _h("admin", "gitpull_get", True),
     ("GET", "/api/admin/logs"): _h("admin", "logs_tail", True),
     ("POST", "/api/admin/logs"): _h("admin", "logs_tail", True),
     ("GET", "/api/admin/modules"): _h("admin", "modules_list", True),
@@ -276,6 +283,16 @@ def _call_route(app, module_name: str, func_name: str, body: dict | None):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def handle(self) -> None:
+        """重写：客户端中途断开（刷新/关闭页面）时静默，不刷 traceback。
+
+        BaseHTTPRequestHandler.handle 在读请求行/写响应时若对端关闭会抛
+        ConnectionAborted/Reset/BrokenPipe——属于良性事件，吞掉即可。
+        """
+        try:
+            super().handle()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError):
+            pass
     protocol_version = "HTTP/1.1"
 
     # ---- 辅助 ----
@@ -292,13 +309,25 @@ class Handler(BaseHTTPRequestHandler):
     def _file(self, path: Path, content_type: str) -> None:
         self._file_bytes(path.read_bytes(), content_type)
 
+    def _redirect(self, location: str) -> None:
+        """302 跳转（入口智能指向用）。"""
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", "0")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
     def _file_bytes(self, data: bytes, content_type: str) -> None:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, OSError):
+            pass  # 客户端提前断开（刷新/关闭页面）：良性，静默不刷 traceback
 
     def log_message(self, *args) -> None:  # 静默 access log
         return
@@ -348,7 +377,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = self.path.split("?")[0]
         if path == "/":
-            self._serve_static("wizard.html")
+            # 入口智能指向：已部署（.config/config.yaml 存在）→ 工作台；未初始化 → 向导
+            if (DATA_ROOT / ".config" / "config.yaml").is_file():
+                self._redirect("/admin.html")
+            else:
+                self._serve_static("wizard.html")
             return
         if path == "/api/state":
             self._json(200, _state())
@@ -356,8 +389,13 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/static/"):
             self._serve_static(path[len("/static/"):])
             return
-        if path in ("/wizard.html", "/admin.html", "/login.html"):
-            self._serve_static(path.lstrip("/"))
+        if path in ("/wizard.html", "/admin.html", "/login.html", "/login"):
+            initialized = (DATA_ROOT / ".config" / "config.yaml").is_file()
+            if not initialized and path not in ("/", "/wizard.html"):
+                self._redirect("/")
+                return
+            filename = "login.html" if path == "/login" else path.lstrip("/")
+            self._serve_static(filename)
             return
         if path == "/api/profile/avatar":
             from web.handlers import admin
@@ -421,38 +459,9 @@ class Handler(BaseHTTPRequestHandler):
         self._json(status, data)
 
 
-def _maybe_autostart_opencode(app: WizardApp) -> None:
-    """web 打开前即后台自动安装 opencode（未安装时；selftest 跳过）。"""
-    from web.handlers import opencode_setup
-    if opencode_setup.SELFTEST:
-        return
-    if opencode_setup.detect_installed():
-        return
-    if app.job_running():
-        return
-    cmds = opencode_setup.build_install_commands()
-    if cmds:
-        app.start_job("opencode_install", cmds, on_done=lambda ok: opencode_setup.install_done(app, ok))
-        _log("[wizard] opencode 未安装，已在后台启动自动安装（web 界面可看进度）")
-
-
 def main(argv: list[str] | None = None) -> int:
+    """启动 HTTP 服务。"""
     argv = argv or sys.argv[1:]
-    # 打包形态 bridge 模式：`wechat-claw -m bridge.main`（service_up / nssm 启动命令）
-    if len(argv) >= 2 and argv[0] == "-m" and argv[1] == "bridge.main":
-        from bridge import main as bridge_main
-
-        try:
-            import asyncio
-            asyncio.run(bridge_main.main())
-        except KeyboardInterrupt:
-            pass
-        except SystemExit:
-            raise  # 未登录等语义：非零退出码透传（服务管理器可见）
-        except Exception as e:  # noqa: BLE001
-            _log(f"[wizard] bridge 启动失败: {e}")
-            return 1
-        return 0
     port = PORT
     for i, a in enumerate(argv):
         if a == "--port" and i + 1 < len(argv):
@@ -464,9 +473,8 @@ def main(argv: list[str] | None = None) -> int:
     if not SELFTEST:
         try:
             webbrowser.open(url)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _log(f"[wizard] 请手动打开浏览器访问 {url}")
-        _maybe_autostart_opencode(APP)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

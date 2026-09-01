@@ -39,8 +39,16 @@ PLAN.md
 modules/modules_data/*
 !modules/modules_data/.gitkeep
 
-# 模块源工作区（独立仓库 wechat-claw_modules_official，避免嵌套仓库）
-wechat-claw_modules_official/
-
 # 开发日志（不入库不推送）
 devlog/
+
+# 旧版前端备份（保留本地，不上传）
+web/bak/
+
+# opencode 二进制（构建时手动放入，不跟踪）
+
+# 审阅报告（本地产物，不入库）
+ura-*.md
+
+# 本机生成配置（部署产物，不入库）
+opencode.jsonc

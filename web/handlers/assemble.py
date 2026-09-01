@@ -28,7 +28,7 @@ def handle(app, body: dict | None = None) -> dict:
     if app.job_running():
         return {"ok": False, "error": "已有装配/安装任务运行中"}, 409
     steps = [
-        {"stage": "安装依赖（pip install -r）", "cmd": [str(PIP), "install", "-r", str(PROJECT_ROOT / "requirements.txt")]},
+        {"stage": "安装依赖（pip install -r）", "cmd": [str(PIP), "install", "-i", "https://pypi.tuna.tsinghua.edu.cn/simple", "-r", str(PROJECT_ROOT / "requirements.txt")]},
         {"stage": "安装 vendor SDK", "cmd": [str(PIP), "install", "-e", str(PROJECT_ROOT / "vendor" / "wechat_agent_sdk")]},
         {"stage": "校验补丁", "cmd": [str(PY), str(PROJECT_ROOT / "patches" / "apply_patches.py"), "--vendor", "--check-only"]},
     ]

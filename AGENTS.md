@@ -1,39 +1,39 @@
-# 微信助理对话 Agent · 行为规范
+# wechat-claw · 开发环境说明
 
-> 本文档是 wechat-claw 微信对话 agent 的系统提示（opencode ACP 子进程启动时自动加载）。
-> 本文件由初始化向导/管理后台按 `.config/agent/` 字段生成（未配置时为本中立默认版本）；
-> 修改人设请在管理后台「助理人设」中填写后重新生成；系统自述、安全红线为锁定段（不可配置）。
+> 本文件只服务本仓库的开发会话（本机 opencode 加载）。
+> 部署态对话 agent 与此文件无关：其指引经数据根 `instructions/` 目录由 opencode.jsonc
+> 的 `instructions` 数组装载（全索引化，正文按需读，不内联）。
 
+## 项目
 
-## 身份
+wechat-claw：微信主动推送体系。bridge 引擎（消息收发/调度/推送）+ 自描述业务模块
+（modules/<name>/，含 module.json 声明 + worker + agents.md 指引）。
 
-- 角色：你是用户部署的个人数字助理，服务对象是用户
-- 语言习惯：态度中立、可靠、不过度亲昵也不生硬：像专业助理，如实汇报，不迎合不表演
-- 对你的称呼：用户
-- 对助理的称呼：小助手
+## 结构速览
 
-## 基础行为守则
+- `bridge/` — 主引擎：main（装配/入站/推送消费）、session（ACP 会话/权限确认门）、
+  push_server（/push 入口）、push_render（推送单轮渲染）、scheduler、module_source
+- `modules/` — register.py（模块唯一管理入口）、registry_index.py（实时索引）、
+  common/（模块共享库）、modules_data/（运行时数据区）
+- `web/` — 管理后台与初始化向导；agent_gen.py（人设字段 + instructions 生成）
+- `vendor/wechat_agent_sdk/` — 微信 SDK（含 ACP 适配层）
+- `docs/开发文档-0{1..4}` — 总览/组件/操作/模块规范
+- `devlog/` — 开发日志（不入 git）；当前改造决策见 `devlog/DESIGN-DECISION-INDEXER-260827.md`
 
-- 先结论后细节，密度优先，不灌水
-- 口语自然、不端不客套；不确定就明说，不糊弄
-- 复杂任务分步确认；高危操作先说明再做
-- 不过度打扰、不刷屏；尊重选择，建议给到不强推
-- 拿不准意图先问，不猜
+## 开发守则
 
-## 系统自述（运行环境，勿改）
+- 改完必须验证：`.venv/bin/python -m pytest tests/ -q` 全绿再交付
+- 小步提交；遵循现有风格（中文 docstring、logging、原子写 tmp+rename）
+- devlog/ 不入库不推送；决策先落 devlog 再动代码
+- 架构决策记录在 devlog，不写死在代码注释里（代码注释只讲当前行为）
 
-- 运行于 wechat-claw（微信主动推送体系）：bridge 引擎 + 自描述模块
-- 消息经 SDK 收发；主动推送走 /push 入口；权限确认靠微信回复"允许/拒绝"
+## 安全红线（开发环境同样适用）
 
-## 安全红线（不可协商，勿改）
+- 不读取/转发：modules/**/token、agent-SDK/push_token、anniversaries.json.enc、
+  .config/crypto.key、.config/admin.password、~/.wechat-agent-sdk/accounts.json
+- 本仓 opencode.jsonc 为本地私有配置（gitignore），不入库
 
-- 不读取/转发 token 与密钥文件（modules/**/token、agent-SDK/push_token、
-  anniversaries.json.enc、.config/crypto.key、.config/admin.password、
-  ~/.wechat-agent-sdk/accounts.json）
-- 文件发送遵循三级规则：default 直发 / gate 微信确认（30s 无回复拒绝）/ reject 硬拒
-- 敏感路径不写入日志与推送内容
+## 当前改造上下文（260827）
 
-## 其余部分
-
-- 模块业务规范：读取 modules/*/module.json，只加载 enabled: true 的模块，
-  按其规范读取 modules/<name>/agents.md
+全索引化路线执行中：推送独立单轮渲染（已完成）、instructions 索引生成（已完成）、
+索引器 v0 与会话装配待做。模块↔indexer 接口规格为挂起议题，未经讨论不得实现。

@@ -116,6 +116,19 @@ jobs:
         with:
           path: assets
           merge-multiple: true
+      - name: Extract release notes from CHANGELOG
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          python - "$VERSION" <<'EOF'
+          import re, sys
+          version = sys.argv[1]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^## \[{re.escape(version)}\]\s+-\s+.*$.*?(?=^## \[|\Z)", text, re.S | re.M)
+          if not m:
+              raise SystemExit(f"CHANGELOG 未找到 [{version}] 节，发布中止")
+          open(".release-notes.md", "w", encoding="utf-8").write(m.group(0).strip() + "\n")
+          EOF
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -123,5 +136,5 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           gh release create "$GITHUB_REF_NAME" assets/* \
             --title "wechat-claw ${VERSION}" \
-            --notes "wechat-claw ${VERSION}：Windows / macOS / Linux 三端单文件可执行产物。" \
+            --notes-file .release-notes.md \
             --repo "$GITHUB_REPOSITORY"

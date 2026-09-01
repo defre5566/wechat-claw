@@ -98,11 +98,21 @@ def profile_get(app, body: dict | None = None) -> dict:
         "habits": get_habits(),
         "identity": agent_gen.get_identity(),
         "rules": agent_gen.get_rules(),
+        "lifestyle": _load_lifestyle(),
     }
+
+
+def _load_lifestyle() -> str:
+    return str(agent_gen._userdata.load("agent/lifestyle", "") or "")
+
+
+def _save_lifestyle(value: str) -> bool:
+    return agent_gen._userdata.save("agent/lifestyle", value)
 
 
 def profile_set(app, body: dict | None = None) -> dict:
     body = body or {}
+    identity_changed = "identity" in body or "rules" in body
     if "city" in body:
         set_city(str(body["city"]))
     if "habits" in body:
@@ -111,7 +121,24 @@ def profile_set(app, body: dict | None = None) -> dict:
         agent_gen.set_identity(dict(body["identity"]))
     if "rules" in body:
         agent_gen.set_rules([str(r) for r in body["rules"]])
-    return {"ok": True}
+    if "lifestyle" in body:
+        _save_lifestyle(str(body.get("lifestyle", "")))
+    result = {"ok": True}
+    if identity_changed:
+        # 人设变更 → 同步重建 tier 分档文件（生成 ~20-120s；失败随响应浮到 UI，
+        # 不再静默后台——260829 P2：异步版让"换人设不生效"无感知）
+        try:
+            regen_ok = agent_gen.regenerate_tiers()
+        except Exception as e:  # noqa: BLE001 tier 生成异常不影响字段保存
+            regen_ok = False
+            result["tiers"] = {"ok": False, "error": str(e)}
+        else:
+            result["tiers"] = {"ok": True} if regen_ok else {
+                "ok": False, "error": "生成校验未通过（详见 web.log），已保留旧人设"}
+        if not regen_ok:
+            result["ok"] = True  # 字段已保存；tier 失败向前端如实报告但不 5xx 整体
+        result["tiers_note"] = "分档在新会话生效"
+    return result
 
 
 def weather_get(app, body: dict | None = None) -> dict:
@@ -225,16 +252,180 @@ def profile_undo(app, body: dict | None = None) -> dict:
 
 
 def agents_render(app, body: dict | None = None) -> dict:
-    out = agent_gen.write_agents()
+    out = agent_gen.ensure_builtins()
     return {"ok": True, "file": str(out)}
+
+
+_PERSONA_OPT_TEMPLATE = """你是一名专业的人设优化顾问。请把下面的「角色设定」和「语言习惯」分别扩写、优化成更丰满、更可执行、符合个人数字助理定位的文本。
+
+用户称呼：{address}
+助理名称：{assistant_name}
+当前角色设定：{role}
+当前语言习惯：{language}
+行为守则：{rules}
+兴趣爱好：{habits}
+生活习惯：{lifestyle}
+
+要求：
+1. 「角色设定」至少 8 句，覆盖：身份定位、陪伴方式、沟通风格、边界意识、主动性原则、与用户的关系、日常行为准则、自我要求
+2. 「语言习惯」至少 8 句，覆盖：句式偏好、用词风格、礼貌分寸、解释方式、拒绝方式、提问方式、语气控制、特殊场景用语
+3. 语言平实具体，不说空话套话，不要“我是一个……”式的苍白开场
+4. 严格按下面的格式输出，不要标题、不要额外解释：
+
+【角色设定】
+<优化后的角色设定，至少 8 句>
+【语言习惯】
+<优化后的语言习惯，至少 8 句>"""
+
+
+def _extract_sections(output: str) -> dict:
+    """按【角色设定】/【语言习惯】标记截取两段；缺标记时尽力回退。"""
+    role = language = ""
+    if "【角色设定】" in output:
+        rest = output.split("【角色设定】", 1)[1]
+        if "【语言习惯】" in rest:
+            role, language = rest.split("【语言习惯】", 1)
+        else:
+            role = rest
+    elif "【语言习惯】" in output:
+        language = output.split("【语言习惯】", 1)[1]
+    else:
+        role = output
+    return {"role": role.strip(), "language": language.strip()}
+
+
+def _log_opencode_persona_failure(message: str) -> None:
+    """记录人设优化失败详情；不把模型错误文本返回给前端字段。"""
+    try:
+        path = DATA_ROOT / "logs" / "web.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        from datetime import datetime
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} [persona] {message}\n")
+    except OSError:
+        pass
+
+
+def optimize_persona(app, body: dict | None = None) -> dict:
+    """用 opencode run 优化人设：前端传入表单当前 role/language，返回两段截取结果。"""
+    import os
+    import subprocess
+    body = body or {}
+    role_in = str(body.get("role", "") or "").strip()
+    lang_in = str(body.get("language", "") or "").strip()
+    if not role_in and not lang_in:
+        return {"ok": False, "error": "角色设定和语言习惯都为空，无法优化"}, 400
+    from bridge.config import get as get_cfg
+    from bridge.config import WORK_ROOT, resolve_opencode, xdg_env, no_window_flags
+    binary = resolve_opencode()
+    if not binary:
+        return {"ok": False, "error": "未找到 opencode 可执行文件（acp.command / PATH / ~/.opencode/bin）"}, 400
+    # 模型：config acp.model；未配置则不带 -m（用 opencode 部署默认模型，
+    # 不落 fallback 常量——deepseek 教训：无凭据环境静默失败）
+    model = str(get_cfg("acp.model") or "").strip()
+    ident = agent_gen.get_identity()
+    prompt = _PERSONA_OPT_TEMPLATE.format(
+        address=str(ident.get("address") or ""),
+        assistant_name=str(ident.get("assistant_name") or ""),
+        role=role_in,
+        language=lang_in,
+        rules="；".join(agent_gen.get_rules()),
+        habits="、".join(get_habits()),
+        lifestyle=_load_lifestyle(),
+    )
+    env = os.environ.copy()
+    env.update(xdg_env())
+    try:
+        # cwd=数据根（=项目根）：opencode run 在此加载 opencode.jsonc，
+        # 否则进程继承 web 启动目录导致上下文错位
+        argv = [binary, "run"]
+        if model:
+            argv += ["-m", model]
+        argv.append(prompt)
+        r = subprocess.run(argv,
+                           capture_output=True, text=True, timeout=120, env=env,
+                           cwd=str(WORK_ROOT),
+                           creationflags=no_window_flags())
+    except subprocess.TimeoutExpired:
+        _log_opencode_persona_failure("opencode 优化超时（120 秒）")
+        return {"ok": False, "error": "opencode 优化超时（120 秒），请稍后重试"}, 504
+    except OSError as e:
+        _log_opencode_persona_failure(f"opencode 优化进程异常：{e}")
+        return {"ok": False, "error": "opencode 优化进程启动失败，请检查配置"}, 502
+    if r.returncode != 0:
+        detail = (r.stderr or r.stdout or "").strip().replace("\n", " ")[-500:]
+        _log_opencode_persona_failure(f"opencode 返回码={r.returncode}，详情={detail}")
+        return {"ok": False, "error": "opencode 优化失败，请检查模型配置或网络连接"}, 502
+    output = (r.stdout or "").strip()
+    if not output:
+        _log_opencode_persona_failure("opencode 优化成功但未返回 stdout")
+        return {"ok": False, "error": "opencode 未返回任何输出"}, 502
+    if output.startswith("Error:") or "Unexpected server error" in output or "UnknownError" in output:
+        _log_opencode_persona_failure(f"opencode stdout 含错误标记：{output[-500:]}")
+        return {"ok": False, "error": "opencode 优化失败，请检查模型配置或网络连接"}, 502
+    sections = _extract_sections(output)
+    if not sections["role"] and not sections["language"]:
+        return {"ok": True, "role": output, "language": "", "fallback": True}
+    return {"ok": True, **sections}
 
 
 # ---------- 用户配置（config.yaml 用户段） ----------
 
+_MODELS_CACHE: list | None = None
+_MODELS_CACHE_TS: float = 0.0
+_MODELS_TTL = 300  # 候选列表缓存 5 分钟（模型池变化低频，避免每次打开都跑子进程）
+
+
+def _fetch_opencode_models(max_sec: float = 10.0) -> list[str]:
+    """跑 `opencode models` 拿候选模型列表；失败/超时返回 [].
+
+    空列表时前端不渲染下拉，仅显示文本框（schema hint 已说明可手填 provider/model）。
+    """
+    import subprocess
+    import time as _time
+    from bridge.config import resolve_opencode, no_window_flags
+    binary = resolve_opencode()
+    if not binary:
+        return []
+    try:
+        r = subprocess.run([str(binary), "models"],
+                           capture_output=True, text=True,
+                           timeout=max_sec, creationflags=no_window_flags())
+    except Exception:  # noqa: BLE001 模型列表失败不阻塞配置页
+        return []
+    if r.returncode != 0:
+        return []
+    out = []
+    for ln in (r.stdout or "").splitlines():
+        name = ln.strip()
+        if name and not name.startswith("#"):
+            out.append(name)
+    return out
+
+
+def models_list(app, body: dict | None = None) -> dict:
+    """模型候选列表（缓存 5 分钟）：schema_get 注入 options 与前端复用同一来源。"""
+    global _MODELS_CACHE, _MODELS_CACHE_TS
+    import time as _time
+    if _MODELS_CACHE is None or _time.monotonic() - _MODELS_CACHE_TS > _MODELS_TTL:
+        _MODELS_CACHE = _fetch_opencode_models()
+        _MODELS_CACHE_TS = _time.monotonic()
+    return {"ok": True, "models": list(_MODELS_CACHE)}
+
+
 def schema_get(app, body: dict | None = None) -> dict:
-    """返回 config 用户段 schema（前端按此渲染高级设置表单）。"""
+    """返回 config 用户段 schema（前端按此渲染高级设置表单）。
+
+    acp.model 为动态 select：options 经 opencode models 注入（缓存 5 分钟），
+    探测失败则注入空列表（前端回退文本框）。
+    """
     from web.schema.config_schema import get_schema
-    return {"ok": True, "schema": get_schema()}
+    schema = get_schema()
+    for group in schema:
+        for f in group.get("fields") or []:
+            if f.get("key") == "model" and group["group"] == "acp":
+                f["options"] = models_list(app).get("models") or []
+    return {"ok": True, "schema": schema}
 
 
 def settings_get(app, body: dict | None = None) -> dict:
@@ -261,8 +452,19 @@ def settings_set(app, body: dict | None = None) -> dict:
     clean = result["clean"]
     try:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # 合并写入（group 级）：clean 只含 schema 内组——整文件覆盖会清掉 schema 外
+        # 仍需保留的段（如 update.auto_enabled 已迁模块页、历史残留段）
+        existing = {}
+        if CONFIG_FILE.is_file():
+            try:
+                existing = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
+                if not isinstance(existing, dict):
+                    existing = {}
+            except Exception:
+                existing = {}
+        merged = {**existing, **clean}
         CONFIG_FILE.write_text(
-            yaml.safe_dump(clean, allow_unicode=True, sort_keys=False), encoding="utf-8"
+            yaml.safe_dump(merged, allow_unicode=True, sort_keys=False), encoding="utf-8"
         )
         return {"ok": True}
     except OSError as e:
@@ -287,11 +489,18 @@ def _log_match(line: str, level: str, module: str, keyword: str) -> bool:
 def logs_tail(app, body: dict | None = None) -> dict:
     """日志尾部 + 过滤：level/module/keyword（正则子串，大小写不敏感 level）。"""
     body = body or {}
-    n = int(body.get("tail", 200))
+    try:
+        n = int(body.get("tail", 200))
+    except (TypeError, ValueError):
+        n = 200
+    n = max(1, min(n, 2000))
     level = str(body.get("level", "")).strip()
     module = str(body.get("module", "")).strip()
     keyword = str(body.get("keyword", "")).strip()
-    log_file = DEPLOY_ROOT / "logs" / "system.log"
+    # 日志真源 = 数据根 logs/system.log（bridge/模块写这里；exe 形态下 DEPLOY_ROOT
+    # 与数据根分离，用程序根会读错路径——issue #7）
+    from bridge.config import WORK_ROOT
+    log_file = WORK_ROOT / "logs" / "system.log"
     lines = []
     if log_file.is_file():
         try:
@@ -514,9 +723,35 @@ def modules_toggle(app, body: dict | None = None) -> dict:
     name = body.get("name", "")
     enabled = bool(body.get("enabled"))
     from modules.register import set_enabled
-    if set_enabled(name, enabled):
-        return {"ok": True}
-    return {"ok": False, "error": f"模块 {name} 不存在或操作失败"}, 400
+    ok, why = set_enabled(name, enabled)
+    if not ok:
+        return {"ok": False, "error": why or f"模块 {name} 不存在或操作失败"}, 400
+    # 写信号文件通知 bridge：重生成 AGENTS.md + 清 session + 发提示
+    # 累积列表模式：10 秒内开/关多个模块 → bridge 一次处理，不重复清 session
+    try:
+        import json as _json
+        from datetime import datetime
+        from bridge.config import DATA_ROOT
+        signal = DATA_ROOT / ".config" / ".agents-reload-requested"
+        signal.parent.mkdir(parents=True, exist_ok=True)
+        entries = []
+        if signal.is_file():
+            try:
+                data = _json.loads(signal.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    entries = data
+            except Exception:
+                pass
+        entries.append({"module": name, "enabled": enabled, "at": datetime.now().isoformat(timespec="seconds")})
+        signal.write_text(_json.dumps(entries, ensure_ascii=False) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    # job 登记失败随 toggle 响应浮出（批次 A 漏取——save 端点有、toggle 没有）
+    from modules.register import take_job_error
+    job_err = take_job_error(name)
+    if job_err:
+        return {"ok": True, "job_error": f"模块已{'启用' if enabled else '停用'}，但 agent 任务登记失败：{job_err}"}
+    return {"ok": True}
 
 
 def modules_install(app, body: dict | None = None) -> dict:
@@ -626,3 +861,104 @@ def source_refresh(app, body: dict | None = None) -> dict:
     if not r["ok"]:
         return {"ok": False, "error": r["error"]}, 400
     return {"ok": True, "updated": r["updated"], "modules": r["modules"]}
+
+
+def autostart_get(app, body: dict | None = None) -> dict:
+    """自启动状态（服务/用户级/无 + bridge 运行态）。"""
+    from web.handlers.service_up import autostart_status
+    return autostart_status()
+
+
+def autostart_set(app, body: dict | None = None) -> dict:
+    """开机自动启动开关：开启/关闭（Windows 非管理员经 UAC 提权）。"""
+    body = body or {}
+    from web.handlers.service_up import autostart_set as _set
+    return _set(bool(body.get("on", False)))
+
+
+def status_get(app, body: dict | None = None) -> dict:
+    """服务运行状态（欢迎区真实检测）：bridge 运行 + 模块数 + 自启模式 + web 自身。"""
+    from web.handlers.service_up import autostart_status, _bridge_running
+    from modules.registry_index import build_index
+    try:
+        mods = build_index()
+        module_count = len(mods)
+    except Exception:
+        module_count = 0
+    st = autostart_status()
+    return {
+        "ok": True,
+        "bridge_running": _bridge_running(),
+        "module_count": module_count,
+        "autostart_mode": st.get("mode", "none"),
+        "web_ok": True,
+    }
+
+
+def start_bridge(app, body: dict | None = None) -> dict:
+    """手动启动 bridge（基础设置页「启动」按钮调用）。"""
+    # 预检 opencode：缺失时直接报原因，不产生必败子进程（spawn 报 WinError 2 信息量为零）
+    from bridge.config import resolve_opencode
+    from bridge.main import OPENCODE_LOOKUP_HINT
+    if not resolve_opencode():
+        return {"ok": False, "steps": [{
+            "cmd": f"opencode 未找到（已查 {OPENCODE_LOOKUP_HINT}），请到初始化向导第二步安装",
+            "ok": False,
+        }]}
+    from web.handlers.service_up import _spawn_bridge_now
+    steps = _spawn_bridge_now()
+    ok = all(s.get("ok") for s in steps)
+    return {"ok": ok, "steps": steps}
+
+
+def version_get(app, body: dict | None = None) -> dict:
+    """版本检测：当前版本（源码 git describe / exe VERSION 常量）+ 最新 release 版本。"""
+    import subprocess
+    from bridge.config import VERSION
+    import json, urllib.request
+    # 当前版本
+    has_git = False
+    current = VERSION
+    try:
+        r = subprocess.run(["git", "describe", "--tags", "--always"], capture_output=True, text=True, timeout=10)
+        if r.returncode == 0 and r.stdout.strip():
+            current = r.stdout.strip()
+            has_git = True
+    except Exception:
+        pass
+    # 最新版本
+    latest = VERSION
+    download_url = ""
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/defre5566/wechat-claw/releases/latest",
+            headers={"User-Agent": "wc-version", "Accept": "application/vnd.github+json"},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            latest = (data.get("tag_name") or "").lstrip("v")
+            assets = data.get("assets") or []
+            win = next((a for a in assets if "windows" in (a.get("name") or "")), None)
+            if win:
+                download_url = win.get("browser_download_url") or ""
+            if not download_url and data.get("html_url"):
+                download_url = data["html_url"]
+    except Exception:
+        latest = VERSION
+    is_latest = current == latest or current.lstrip("v") == latest.lstrip("v")
+    return {"ok": True, "current": current, "latest": latest, "is_latest": is_latest, "has_git": has_git, "download_url": download_url}
+
+
+def gitpull_get(app, body: dict | None = None) -> dict:
+    """源码 git pull 更新（高级设置页按钮调用）。"""
+    import shutil as _shutil
+    import subprocess
+    if not _shutil.which("git"):
+        return {"ok": False, "error": "本机未安装 git，无法源码更新；请使用「下载最新版」升级 exe"}
+    try:
+        r = subprocess.run(["git", "pull"], capture_output=True, text=True, timeout=60, cwd=str(DATA_ROOT))
+        if r.returncode != 0:
+            return {"ok": False, "error": (r.stderr or r.stdout)[:500]}
+        return {"ok": True, "output": (r.stdout or "")[:500]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}

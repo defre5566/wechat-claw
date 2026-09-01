@@ -112,14 +112,21 @@ def get_module_state(name: str) -> dict:
     return {}
 
 
-def save_module_state(name: str, version: str = "", source_id: str = "", installed_at: str = "") -> bool:
-    """写 installed.json（安装/更新后记录版本与来源）。"""
+def save_module_state(
+    name: str, version: str = "", source_id: str = "", installed_at: str = "",
+    sha256: str = "", files: list | None = None,
+) -> bool:
+    """写 installed.json（安装/更新后记录版本与来源；源安装模块附完整性基准 sha256+files）。"""
     import datetime
     data = get_module_state(name)
     if version:
         data["version"] = str(version)
     if source_id:
         data["source_id"] = str(source_id)
+    if sha256:
+        data["sha256"] = str(sha256)
+    if files:
+        data["files"] = list(files)
     data["installed_at"] = installed_at or datetime.datetime.now().isoformat(timespec="seconds")
     try:
         dd = module_data_dir(name)
@@ -181,10 +188,36 @@ def _sync_schedule_from_settings(name: str) -> None:
     _save_module_json(name, data)
 
 
+def _refresh_integrity_baseline(name: str) -> None:
+    """系统改写 module.json 后刷新完整性基准（installed.json 的 sha256）。
+
+    运行时改写（调度联动/设置保存）会改变 module.json 字节，若不刷新基准，
+    完整性校验（调度前快检/每日全量）会把系统合法变更误判为本地篡改。
+    仅源安装模块有基准（installed.json 含 sha256+files）；本地手写模块跳过。
+    """
+    try:
+        from bridge.module_source import _module_sha256, MODULES_DIR as _MS_MODULES
+        st = get_module_state(name)
+        sha = st.get("sha256")
+        files = st.get("files")
+        if not sha or not files:
+            return
+        actual = _module_sha256(_MS_MODULES / name, files)
+        if actual != sha:
+            st["sha256"] = actual
+            save_module_state(name, sha256=actual, files=files)
+    except Exception:
+        pass  # 刷新失败不影响主流程（下次安装/更新会重建基准）
+
+
 def _save_module_json(name: str, data: dict) -> bool:
     try:
         mj = MODULES_DIR / name / "module.json"
-        mj.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        # newline="\n"：Windows 上 write_text 默认把 \n 转 \r\n，会改变文件字节——
+        # 完整性基准（sha256）与作者（LF）不一致，显式保持 LF
+        mj.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                      encoding="utf-8", newline="\n")
+        _refresh_integrity_baseline(name)
         return True
     except OSError:
         return False
@@ -298,18 +331,68 @@ def update_module(
     return ok
 
 
-def set_enabled(name: str, enabled: bool) -> bool:
-    """唯一启停入口：写数据区 settings.json 的 enabled（module.json 不再承载部署状态）。"""
+def set_enabled(name: str, enabled: bool) -> tuple[bool, str]:
+    """唯一启停入口：写数据区 settings.json 的 enabled（module.json 不再承载部署状态）。
+
+    返回 (成功与否, 原因)：不兼容主程序基线时 (False, 原因)，web/CLI 明示给用户。
+    """
     if not module_exists(name):
-        return False
+        return False, f"模块 {name} 不存在"
+    if enabled:
+        # 兼容门禁（issue #4）：module.json 必须声明 bridge_compat 且含当前基线
+        from bridge.compat import compat_ok
+        try:
+            mj = json.loads((MODULES_DIR / name / "module.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            return False, f"module.json 读取失败：{e}"
+        ok, why = compat_ok(mj)
+        if not ok:
+            return False, why
     ok = _merge_settings(name, enabled=bool(enabled))
     if ok:
         if not enabled:
             from bridge.jobs import unregister_jobs
             unregister_jobs(name)  # 停用 → 注销该模块全部 agent job（无声明无副作用）
+            sync_index_on_disable(name)  # 检索域：索引文件失效（.off 保留）
+        else:
+            sync_index_on_enable(name)   # 检索域：放置/恢复索引文件
         from modules.registry_index import invalidate
         invalidate()
-    return ok
+    return ok, "" if ok else "settings.json 写入失败"
+
+
+# ---------- 指令索引插拔（260827 议题1：settings 管调度域，index 文件管检索域） ----------
+
+def sync_index_on_enable(name: str) -> None:
+    """启用：放置/恢复模块索引文件（机制在 web.agent_gen.place_index）。"""
+    try:
+        from web.agent_gen import place_index
+        place_index(name)
+    except Exception as e:  # noqa: BLE001 索引放置失败不阻塞启用
+        print(f"[register] {name} 索引放置失败: {e}")
+
+
+def sync_index_on_disable(name: str) -> None:
+    """关闭：索引文件加 .off 失效（保留 worker/用户态，再启用即恢复）。"""
+    try:
+        from web.agent_gen import INDEX_DIR
+        live = INDEX_DIR / f"{name}.json"
+        off = INDEX_DIR / f"{name}.json.off"
+        if live.is_file():
+            live.replace(off)
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] {name} 索引失效失败: {e}")
+
+
+def sync_index_on_uninstall(name: str) -> None:
+    """卸载：移除索引文件（含 .off 残留）；幂等。"""
+    try:
+        from web.agent_gen import INDEX_DIR
+        for f in (INDEX_DIR / f"{name}.json", INDEX_DIR / f"{name}.json.off"):
+            if f.is_file():
+                f.unlink()
+    except Exception as e:  # noqa: BLE001
+        print(f"[register] {name} 索引移除失败: {e}")
 
 
 def get_module(name: str) -> dict | None:
@@ -381,6 +464,7 @@ def uninstall(name: str, keep_data: bool = True) -> bool:
         refresh_permissions()  # 卸载后撤销该模块豁免
         from bridge.jobs import unregister_jobs
         unregister_jobs(name)  # 卸载 → 注销该模块 agent job（无声明无副作用）
+        sync_index_on_uninstall(name)  # 检索域：移除索引文件（含 .off 残留）
         from modules.registry_index import invalidate
         invalidate()
         return True
@@ -427,10 +511,32 @@ def main(argv: list[str] | None = None) -> int:
 
     if argv[0] in ("--enable", "--disable") and len(argv) >= 2:
         name = argv[1]
-        if set_enabled(name, argv[0] == "--enable"):
-            print(f"[register] {name} 已{'启用' if argv[0] == '--enable' else '关闭'}")
+        ok, why = set_enabled(name, argv[0] == "--enable")
+        if ok:
+            # 写信号文件通知 bridge：重生成 AGENTS.md + 清 session + 发提示
+            # 累积列表模式：10 秒内开/关多个模块 → bridge 一次处理，不重复清 session
+            try:
+                import json as _json
+                from datetime import datetime
+                from bridge.config import DATA_ROOT
+                signal = DATA_ROOT / ".config" / ".agents-reload-requested"
+                signal.parent.mkdir(parents=True, exist_ok=True)
+                entries = []
+                if signal.is_file():
+                    try:
+                        data = _json.loads(signal.read_text(encoding="utf-8"))
+                        if isinstance(data, list):
+                            entries = data
+                    except Exception:
+                        pass
+                entries.append({"module": name, "enabled": argv[0] == "--enable",
+                                 "at": datetime.now().isoformat(timespec="seconds")})
+                signal.write_text(_json.dumps(entries, ensure_ascii=False) + "\n", encoding="utf-8")
+            except Exception:
+                pass
+            print(f"[register] {name} 已{'启用' if argv[0] == '--enable' else '关闭'}（instructions 将在 ~10 秒内重载）")
             return 0
-        print(f"[register] 模块不存在: {name}")
+        print(f"[register] {name} 操作失败：{why or '模块不存在'}")
         return 1
 
     if argv[0] == "--uninstall" and len(argv) >= 2:
@@ -459,13 +565,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if reissue_token(argv[1]) else 1
 
     if argv[0] == "--sync-jobs" and len(argv) >= 2:
-        from bridge.jobs import sync_jobs
-        r = sync_jobs(argv[1])
+        from bridge.jobs import sync_module_jobs
+        r = sync_module_jobs(argv[1])  # 走统一联动入口：phase 级 + 模板级开关检查
+        if r.get("skipped"):
+            print(f"[register] sync-jobs: {argv[1]} 无 job 声明，跳过")
+            return 0
         if not r["ok"]:
             print(f"[register] sync-jobs: {r.get('error', '失败')}")
             return 1
-        print(f"[register] {argv[1]} job 已渲染: {r['job']['title']} @ {r['job']['schedule']}")
-        print(r.get("install_hint", ""))
+        if "job" in r:
+            print(f"[register] {argv[1]} job 已渲染: {r['job']['title']} @ {r['job']['schedule']}")
+            print(r.get("install_hint", ""))
+        else:
+            print(f"[register] {argv[1]} 开关为关，job 已注销: {r.get('removed', [])}")
         return 0
 
     # 注册/更新（G1 分流：已存在模块 → update_module 不换 token；新模块 → register_module 发卡）

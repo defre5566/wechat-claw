@@ -1,0 +1,3 @@
+# Windows autocrlf 保护：vendor 补丁为字节级（apply_patches 对 vendor SDK 打 4 处补丁），
+# 检出换行转换会破坏字节匹配——vendor 一律按二进制处理。
+vendor/** -text

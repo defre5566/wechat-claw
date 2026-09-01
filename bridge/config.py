@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os as _os
 import shutil as _shutil
+import subprocess as _subprocess
 import sys as _sys
 from pathlib import Path
 
@@ -28,6 +29,7 @@ log = logging.getLogger("wechat-config")
 # 用户数据按平台规范落用户目录（exe 是部署包，不是数据包）。
 _FROZEN = getattr(_sys, "frozen", False)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent          # 源码形态项目根
+VERSION = "0.1.6"  # 发版版本号（唯一真源，全仓 import 收敛；exe 形态用此值；源码形态优先 git describe --tags）
 DEPLOY_ROOT = (Path(_sys.executable).resolve().parent if _FROZEN else PROJECT_ROOT)  # 程序根（exe/项目）
 RESOURCE_ROOT = (Path(getattr(_sys, "_MEIPASS", PROJECT_ROOT)) if _FROZEN else PROJECT_ROOT)  # 资源根
 
@@ -100,12 +102,10 @@ DEFAULTS_USER: dict = {
     "acp": {
         "command": "opencode",
         "port": 45678,
+        "model": "",  # 空 = 不指定（opencode 部署默认模型）；填 provider/model 名（web 高级设置可切）
     },
     "file_send": {
-        "default_dirs": [
-            "~/文档", "~/下载", "~/桌面", "~/图片",
-            "~/音乐", "~/视频", "~/公共", "inbox",   # inbox = <数据根>/inbox
-        ],
+        "default_dirs": [],  # 默认空：直发目录由用户自己填（260830 定案，未被填的路径走 gate）
         "reject_dirs": [".config", "agent-SDK", "~/.wechat-agent-sdk",
                         "~/.ssh", "~/.gnupg"],  # .config = <数据根>/.config；agent-SDK = <数据根> 下微信 SDK 凭证目录
         "reject_name_re": "token|secret|credential|private|accounts\\.json|anniversaries\\.json\\.enc",
@@ -217,8 +217,9 @@ def xdg_env() -> dict:
 def resolve_opencode() -> str | None:
     """opencode 可执行文件解析（job 登记/单元生成与主链路 acp.command 同源寻址）。
 
-    优先级：acp.command 显式配置（绝对路径校验，无效即失败）→ PATH → 官方默认
-    安装目录 ~/.opencode/bin。找不到返回 None（调用方明确报错并回滚）。
+    优先级：acp.command 显式配置（绝对路径校验，无效即失败）→ PATH → 本系统部署
+    目录 <数据根>/bin（向导安装目标，按平台文件名）→ 官方默认 ~/.opencode/bin。
+    找不到返回 None（调用方明确报错并回滚）。
     """
     cmd = str(get("acp.command") or "").strip()
     if cmd and ("/" in cmd or "\\" in cmd):
@@ -229,7 +230,20 @@ def resolve_opencode() -> str | None:
     found = _shutil.which(cmd or "opencode")
     if found:
         return found
-    fallback = Path.home() / ".opencode" / "bin" / "opencode"
-    if fallback.is_file() and _os.access(fallback, _os.X_OK):
-        return str(fallback)
+    # 按平台候选名（Windows zip 解压后可能带/不带 .exe）
+    names = ("opencode.exe", "opencode") if _os.name == "nt" else ("opencode",)
+    for base in (WORK_ROOT / "bin", Path.home() / ".opencode" / "bin"):
+        for name in names:
+            p = base / name
+            if p.is_file() and _os.access(p, _os.X_OK):
+                return str(p)
     return None
+
+
+def no_window_flags() -> int:
+    """Windows 下返回 CREATE_NO_WINDOW（0x08000000），其他平台返回 0。
+
+    用于 subprocess.Popen/run/asyncio.create_subprocess_exec 的 creationflags 参数，
+    防止子进程弹出控制台窗口。跨平台安全：POSIX 上 creationflags=0 被忽略不报错。
+    """
+    return 0x08000000 if _os.name == "nt" else 0

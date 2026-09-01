@@ -1,7 +1,7 @@
 """common 纯函数最小回归集。
 
 覆盖：调度规则判定器（cron_match / every_interval / _rand_offset）、防重 IO（_keep_key / _keep_ts_key / prune_state_file）。
-注：vault 任务解析（parse_task_line / scan_md_tasks / sort_due_key）随 task.py 归模块，测试在模块源 tests/。
+注：vault 任务解析（parse_task_line / scan_md_tasks）随 task.py 归模块，测试在模块源 tests/。
 """
 from __future__ import annotations
 
@@ -191,3 +191,21 @@ def test_city_with_coords_fallback_to_parent(monkeypatch):
     assert _city_with_coords("110101")[0] == "110101"
     assert _city_with_coords("110100")[0] == "110000"  # 无坐标 → 父级
     assert _city_with_coords("999999") is None
+
+
+# ---------- common 统一出口（__init__ 导出面回归） ----------
+
+def test_common_exports():
+    """模块侧统一入口 `from common import X`：关键能力必须可从出口导入（防新增函数漏导出）。"""
+    import modules.common as common
+    for name in ("get_lunar", "get_jieqi", "get_fufu", "get_jiujiu", "in_fufu", "in_jiujiu",
+                 "is_holiday",
+                 "load_sent_json", "save_sent_json", "prune_state_file",
+                 "shared_load", "shared_save", "load_json", "time_to_cron",
+                 "fetch_weather", "get_weather", "weather_alerts",
+                 "available", "fetch_localdata",
+                 "get_location", "get_city", "set_city", "undo_city",
+                 "get_habits", "set_habits", "undo_habits",
+                 "post_push", "log_event"):
+        attr = getattr(common, name, None)
+        assert callable(attr), f"common 出口缺失或不可调用: {name}"

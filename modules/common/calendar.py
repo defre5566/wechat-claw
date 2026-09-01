@@ -1,6 +1,6 @@
-"""农历 / 节气 / 三伏（lunar-python）。
+"""农历 / 节气 / 三伏 / 三九（lunar-python）。
 
-早晚报与 emotion 可读这些字段生成节气/三伏相关建议与关心。
+早晚报与 emotion 可读这些字段生成节气/三伏/三九相关建议与关心。
 """
 from __future__ import annotations
 
@@ -39,3 +39,16 @@ def get_fufu(d: date | None = None) -> list[str]:
 def in_fufu(d: date | None = None) -> bool:
     """是否三伏期间（用于"三伏天"关怀）。"""
     return bool(get_fufu(d))
+
+
+def get_jiujiu(d: date | None = None) -> list[str]:
+    """当前数九状态。返回如 ['一九第3天']；非数九期返回 []。"""
+    d = d or date.today()
+    l = Solar.fromYmd(d.year, d.month, d.day).getLunar()
+    sj = l.getShuJiu()
+    return [sj.toFullString()] if sj else []
+
+
+def in_jiujiu(d: date | None = None) -> bool:
+    """是否数九期间（用于"数九寒天"关怀）。"""
+    return bool(get_jiujiu(d))

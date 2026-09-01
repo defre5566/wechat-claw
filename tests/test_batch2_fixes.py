@@ -68,24 +68,30 @@ def test_reject_name_re_blocks_accounts():
     assert classify("/tmp/x/ACCOUNTS.JSON") == "reject"
 
 
-def test_reject_dirs_cover_sdk_paths(tmp_path):
-    """F6.2：agent-SDK 与 ~/.wechat-agent-sdk 目录级硬拒。"""
+def test_reject_dirs_cover_sdk_paths(tmp_path, monkeypatch):
+    """F6.2：agent-SDK 与 ~/.wechat-agent-sdk 目录级硬拒。
+
+    历史教训：旧版用真实 DATA_ROOT 建 agent-SDK 且 finally rmtree——部署机数据根
+    里该目录就是微信登录态真身，跑一次全量 pytest 即清掉登录态（260829 鑫证实）。
+    自此 DATA_ROOT/HOME 全部隔离到 tmp_path，永不触碰真实目录。"""
     from bridge import paths
     from bridge.config import DATA_ROOT
-    sdk = DATA_ROOT / "agent-SDK"
+
+    fake_data_root = tmp_path / "data"
+    fake_home = tmp_path / "home"
+    monkeypatch.setattr("bridge.config.DATA_ROOT", fake_data_root)
+    monkeypatch.setattr(paths, "HOME", fake_home)
+    # classify→resolve_path 依赖 bridge.config.DATA_ROOT（模块属性隔离后自动生效）
+    monkeypatch.setattr("bridge.paths.REJECT_DIRS", [fake_data_root / "agent-SDK"])
+    monkeypatch.setattr("bridge.paths.DEFAULT_ALLOW_DIRS", [])
+
+    sdk = fake_data_root / "agent-SDK"
     sdk.mkdir(parents=True, exist_ok=True)
     (sdk / "accounts.json").write_text("{}", encoding="utf-8")
-    try:
-        assert paths.classify(sdk / "accounts.json") == "reject"
-    finally:
-        import shutil
-        shutil.rmtree(sdk, ignore_errors=True)
-    home_sdk = paths.Path.home() / ".wechat-agent-sdk"
-    if not home_sdk.exists():
-        home_sdk.mkdir()
-        try:
-            assert paths.classify(home_sdk / "accounts.json") == "reject"
-        finally:
-            home_sdk.rmdir()
-    else:
-        assert paths.classify(home_sdk / "accounts.json") == "reject"
+    assert paths.classify(sdk / "accounts.json") == "reject"
+
+    home_sdk = fake_home / ".wechat-agent-sdk"
+    home_sdk.mkdir(parents=True, exist_ok=True)
+    (home_sdk / "accounts.json").write_text("{}", encoding="utf-8")
+    assert paths.classify(home_sdk / "accounts.json") == "reject"
+    # 全程只摸 tmp——真实 HOME 与数据根从不被触碰，无需 try/finally 清理

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import time
+from contextlib import contextmanager
 from datetime import datetime
 
 from acp.schema import (
@@ -29,6 +30,33 @@ from .state import (
 )
 
 log = logging.getLogger("wechat-bridge")
+
+
+@contextmanager
+def _quiet_asyncio_exec():
+    """在作用域内给 asyncio.create_subprocess_exec 注入 Windows 无窗口标志。
+
+    acp 包（site-packages）的 spawn_stdio_transport 不接受 creationflags 参数，
+    exe 形态（windowed 无控制台）下拉起控制台程序 opencode.exe 会弹新控制台窗口。
+    此处运行时包装注入（setdefault 不覆盖显式传参），退出即还原——不修改
+    site-packages 磁盘文件（venv 重建/重打包不失效），不碰命令解析链。
+    作用域仅覆盖 ACP 这一次 spawn；POSIX 上 flags=0 无影响。
+    """
+    from .config import no_window_flags
+    if not no_window_flags():
+        yield  # POSIX：无需注入
+        return
+    orig = asyncio.create_subprocess_exec
+
+    def _quiet_exec(*args, **kwargs):
+        kwargs.setdefault("creationflags", no_window_flags())
+        return orig(*args, **kwargs)
+
+    asyncio.create_subprocess_exec = _quiet_exec
+    try:
+        yield
+    finally:
+        asyncio.create_subprocess_exec = orig
 
 
 class PermissionGate:
@@ -152,7 +180,17 @@ class ConfirmAcpAgent(AcpAgent):
         self._ctx = spawn_agent_process(
             client, self._command, *self._args, env=spawn_env, cwd=self._cwd,
         )
-        self._conn, self._process = await self._ctx.__aenter__()
+        try:
+            with _quiet_asyncio_exec():  # Windows：ACP 子进程无窗口（防 opencode 控制台弹框）
+                self._conn, self._process = await self._ctx.__aenter__()
+        except FileNotFoundError as e:
+            # 自启/nssm 等场景 PATH 受限：带实际 command 值落地诊断，WinError 2 不再裸抛
+            log.error(
+                "[acp] 拉起 opencode 失败（找不到可执行文件）: command=%r args=%r (%s)。"
+                "请确认 opencode 在 PATH / <数据根>/bin / ~/.opencode/bin 之一，"
+                "或到 web 向导重新安装", self._command, self._args, e,
+            )
+            raise
 
         await self._conn.initialize(
             protocol_version=PROTOCOL_VERSION,
@@ -160,6 +198,16 @@ class ConfirmAcpAgent(AcpAgent):
             client_capabilities=ClientCapabilities(),
         )
         log.info("[acp] Connection initialized (wechat-confirm mode)")
+
+    def clear_sessions(self) -> None:
+        """清空会话缓存（不杀进程）：下次 chat() 时 new_session → 读最新 AGENTS.md。
+
+        仅清 session 映射（conversation↔session），不清 response/flush 缓存
+        （防正在处理中的消息丢失中间结果）。模块启停后由 _check_agents_reload 调用。
+        """
+        self._sessions.clear()
+        self._active_conversations.clear()
+        log.info("[acp] Sessions cleared (next message creates new session with latest AGENTS.md)")
 
 
 class SessionManager:
@@ -201,6 +249,9 @@ class SessionManager:
             self._last_active.pop(conversation_id, None)  # 归档会话不再是推送目标
             self._last_active[conversation_id] = now
             self._save()
+            # 冷启动装配（乙）：新会话首条消息前按画像刷新当前档位文件
+            from .indexer import refresh_current_tier
+            refresh_current_tier(conversation_id)
             return "expired"
         self._last_active[conversation_id] = now
         self._save()

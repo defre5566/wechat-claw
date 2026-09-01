@@ -146,6 +146,11 @@ def main() -> int:
             checks.append(("config_gen", st == 200 and d.get("ok")
                            and d["results"]["config"]["created"]))
 
+            # ④b 部署后入口智能指向：config.yaml 已生成 → 根路径跳转工作台
+            # （urllib 跟随 302，最终页面应为 admin.html 的 data-app="admin"）
+            st, d = _req(port, "GET", "/", raw=True)
+            checks.append(("entry_after_deploy", st == 200 and b'data-app="admin"' in d))
+
             # ⑤ 登录（selftest mock：pending → confirmed）
             st, d = _req(port, "POST", "/api/login/setup")
             checks.append(("login_setup", st == 200 and d.get("ok") and d.get("qr_url")))
@@ -213,7 +218,7 @@ def main() -> int:
             try:
                 subprocess.run(
                     [str(PY), "-c",
-                     "import sys; sys.path.insert(0, r'%s'); import web.agent_gen as a; a.write_agents()" % str(ROOT)],
+                     "import sys; sys.path.insert(0, r'%s'); import web.agent_gen as a; a.ensure_builtins()" % str(ROOT)],
                     cwd=str(ROOT), env=env, capture_output=True, timeout=30,
                 )
             except Exception:

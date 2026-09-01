@@ -92,21 +92,28 @@ def _load_custom_prompts(data_dir: Path) -> str:
 
 
 def _load_encrypted_template(mod_dir: Path) -> str | None:
-    """模块自带加密任务模板（prompts/base.prompt.enc，引擎解密后使用）。
+    """模块任务模板：明文 base.prompt.md 优先（模块源现行规范）。
 
-    通用机制：模板内容属于模块（引擎不解读、不注入任何模块业务数据）；
-    模块作者以加密文件形式提供任务指示（生产者侧 crypto 加密）。
-    解密失败/文件缺失返回 None（render 层拒绝登记，不降级不兜底）。
+    兼容旧：base.prompt.enc（作者加密）存在时尝试解密——跨机密钥不同（部署机
+    crypto.key 随机生成）解密几乎必然失败，失败按缺失处理（不再拒绝登记）。
     """
+    plain = mod_dir / "prompts" / "base.prompt.md"
+    if plain.is_file():
+        try:
+            txt = plain.read_text(encoding="utf-8")
+            return txt.strip() or None
+        except Exception as e:
+            log.warning("[jobs] base.prompt.md 读取失败: %s", e)
+            return None
     enc = mod_dir / "prompts" / "base.prompt.enc"
     if not enc.is_file():
         return None
     try:
         from modules.common.crypto import decrypt
-        plain = decrypt(enc.read_text(encoding="utf-8"))
-        return plain if plain and str(plain).strip() else None
+        text = decrypt(enc.read_text(encoding="utf-8"))
+        return str(text).strip() or None
     except Exception as e:
-        log.warning("[jobs] base.prompt.enc 解密失败（任务将拒绝登记）: %s", e)
+        log.warning("[jobs] base.prompt.enc 解密失败（按缺失处理）: %s", e)
         return None
 
 
@@ -254,9 +261,16 @@ def sync_jobs(name: str) -> dict:
         return {"ok": False, "error": f"opencode scheduler 登记失败: {e}",
                 "job": r["job"], "job_file": r["job_file"]}
 
+    if inst.get("carrier") == "bridge":
+        # 平台载体降级（如 systemd/user 只读）→ bridge tick 接管触发（#11 自适应）
+        from modules.common.log import log_event
+        log_event("ERROR", name, "job_degraded",
+                  f"平台定时器登记失败（{inst.get('degraded_reason')}），已降级为 bridge 内置调度")
+        r["job_degraded"] = inst.get("degraded_reason", "")
+
     r["install_hint"] = (
         f"job json（数据区留存）: {r['job_file']}\n"
-        f"已自动登记 opencode scheduler: {inst['slug']}（OnCalendar={inst['on_calendar']}）"
+        f"已自动登记 opencode scheduler: {inst['slug']}（carrier={inst.get('carrier')}）"
     )
     return r
 
@@ -272,6 +286,7 @@ def sync_module_jobs(name: str) -> dict:
 
     - 模块无 job_template 声明 → 跳过（skipped=True，不打扰非 agent 型模块）
     - 声明了但对应 phase 的 enabled_field=false（如 planner_on=false）→ 注销 job
+    - job 模板自身声明 enabled_field=false（任务级业务开关，如 briefing_on）→ 注销 job
     - 否则 → 渲染 + 自动登记（sync_jobs）
     """
     mod_dir = MODULES_DIR / name
@@ -291,4 +306,38 @@ def sync_module_jobs(name: str) -> dict:
             if ef and settings.get(ef) is False:
                 return unregister_jobs(name)
             break
+    ef_t = jt.get("enabled_field")   # 任务单自身开关，与 phase 级叠加 AND 判定
+    if ef_t and settings.get(ef_t) is False:
+        return unregister_jobs(name)
     return sync_jobs(name)
+
+
+def job_registered(module: str) -> tuple[bool, str]:
+    """模块 agent job 登记状态查询（common 库承诺接口，worker 诊断用）。
+
+    返回 (已登记与否, 状态说明)：
+    - (True, "systemd/…") = 平台定时器已登记
+    - (True, "bridge")    = 平台载体不可用，已降级 bridge 内置调度（仍会执行）
+    - (False, 原因)        = 未登记（声明了 job_template 但登记失败/被停用联动注销）
+    """
+    from bridge.opencode_jobs import jobs_dir, sched_root, scope_id
+    platform_dir = jobs_dir()                    # 平台登记层（install_job 写入处）
+    audit_dir = module_data_dir(module) / "jobs"  # 模块数据区审计留存
+    platform_jobs = {f.stem: f for f in platform_dir.glob("*.json")} if platform_dir.is_dir() else {}
+    audit_jobs = {f.stem: f for f in audit_dir.glob("*.json")} if audit_dir.is_dir() else {}
+    registered = {k for k in platform_jobs if k in audit_jobs or audit_dir.is_dir() and platform_jobs[k].stem}
+    # 语义：平台层有该模块的 job.json = 已登记（carrier=bridge 为降级中，仍会执行）
+    mine = {}
+    for slug, pf in platform_jobs.items():
+        try:
+            data = json.loads(pf.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if data.get("module") == module:
+            mine[slug] = data.get("carrier", "systemd")
+    if not mine:
+        if audit_jobs:
+            return False, "审计留存存在但平台登记缺失（半登记态，建议重存设置触发重登记）"
+        return False, "模块数据区无 jobs 产物（无 job 声明或从未登记）"
+    degraded = [f"{slug}: carrier=bridge（降级中）" for slug, c in mine.items() if c == "bridge"]
+    return True, "；".join(degraded) if degraded else "平台定时器已登记"

@@ -2,8 +2,8 @@
 
 数据：modules/modules_data/sources.json（用户数据区，随备份）。
 源：builtin 官方源（defre5566/wechat-claw_modules_official，不可删）+ 自定义（github / local）。
-拉取：GitHub 浅 clone（--depth 1）到临时目录 / 本地源直接读 → 读 manifest.json →
-      模块列表缓存 + 源指纹（manifest 内容 sha256，变更检测：指纹变 → 刷新缓存）。
+拉取：HTTP ZIP 归档下载（零 git 依赖，普通用户无需装 git）到临时目录 / 本地源直接读
+      → 读 manifest.json → 模块列表缓存 + 源指纹（manifest 内容 sha256，变更检测）。
 校验（安装时）：清单一致（manifest.files vs 实际文件）+ 结构规范（module.json/worker 对齐 docs/04）
                 + 哈希（模块包 sha256 = files 内容排序拼接；不符自动重拉一次再校验）。
 安装：复制到 modules/<name>/ → register 发 token + 建数据目录 + enabled:false → 刷新缓存/豁免。
@@ -15,7 +15,6 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -31,6 +30,8 @@ OFFICIAL_SOURCE = {
     "id": "official",
     "name": "官方模块库",
     "type": "github",
+    # GitHub 主源（codeload ZIP 纯 HTTP 无登录，镜像轮询国内可达）；
+    # gitee.com/defre5566/wechat-claw_modules_official 为同 commit 实时镜像，仅作参考
     "url": "https://github.com/defre5566/wechat-claw_modules_official.git",
     "builtin": True,
     "added_at": "",
@@ -77,18 +78,107 @@ def _find_source(sources: list[dict], sid: str) -> dict | None:
     return next((s for s in sources if s.get("id") == sid), None)
 
 
-# ---------- 拉取（GitHub 浅 clone / 本地目录） ----------
+# ---------- 拉取（ZIP 下载 / 本地目录；镜像可代理 HTTP 下载） ----------
+
+# GitHub 镜像代理（模块源 ZIP 下载兜底，与 opencode 镜像列表对齐）
+_GIT_MIRRORS = [
+    "https://github.com",
+    "https://ghproxy.com/https://github.com",
+    "https://github.moeyy.xyz/https://github.com",
+    "https://mirror.ghproxy.com/https://github.com",
+]
+
+
+def _fetch_url(url: str, timeout: int = 30, budget: int = 120) -> bytes:
+    """下载 URL 全量内容，分阶段预算（与 opencode 安装器同方案）。
+
+    DNS 挂起不受 urlopen timeout 控制——连接期 Event 短预算 + 下载期总预算。
+    模块库仅几 MB，预算比 opencode（58MB）紧。
+    """
+    import threading
+    import urllib.request
+    connected = threading.Event()
+    result: dict = {}
+
+    def _worker() -> None:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "wechat-claw-module-source"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                connected.set()
+                chunks: list[bytes] = []
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                result["data"] = b"".join(chunks)
+        except Exception as e:  # noqa: BLE001
+            result["err"] = e
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    if not connected.wait(20):
+        raise TimeoutError("20s 内未建立连接（DNS/网络挂起）")
+    t.join(budget - 20)
+    if t.is_alive():
+        raise TimeoutError(f"下载超总预算 {budget}s")
+    if "err" in result:
+        raise result["err"]
+    return result["data"]
+
+
+def _extract_zip_top(zip_data: bytes, dest: Path) -> bool:
+    """解压 ZIP 并把顶层目录（repo-root）内容落位到 dest；失败返回 False。"""
+    import io
+    import zipfile
+    if zip_data[:2] != b"PK":  # 假 200（HTML 错误页）快速拒收
+        return False
+    z = zipfile.ZipFile(io.BytesIO(zip_data))
+    names = z.namelist()
+    top = names[0].split("/")[0] if names else ""
+    if not top:
+        return False
+    tmp = Path(tempfile.mkdtemp(prefix="wc-source-"))
+    try:
+        z.extractall(tmp)
+        if not (tmp / top).is_dir():
+            return False
+        if dest.is_dir():
+            shutil.rmtree(dest)
+        shutil.move(str(tmp / top), str(dest))
+        return True
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
 
 def _git_clone(url: str, dest: Path) -> bool:
-    """浅 clone 到目标目录；成功返回 True。"""
-    try:
-        r = subprocess.run(
-            ["git", "clone", "--depth", "1", "--quiet", url, str(dest)],
-            capture_output=True, text=True, timeout=120,
-        )
-        return r.returncode == 0
-    except Exception:
+    """拉取仓库内容到目标目录（零 git 依赖，纯 HTTP ZIP 归档）。
+
+    - GitHub（官方源与自定义源统一）：codeload archive 直连 + 镜像轮询
+      （gitee 归档需登录+打包交互，纯 HTTP 不可用，故官方源用 GitHub 主源）
+    - gitee URL（兼容旧 sources.json 残留）：转 GitHub 同名仓库拉取
+    安全校验与 git clone 等位：后续 manifest 验签 + 模块 sha256 把关（传输损坏/篡改会被拒）。
+    """
+    if url.startswith("https://gitee.com/") and url.endswith(".git"):
+        # 旧官方源地址：转 GitHub 镜像（同 commit 实时同步）
+        url = "https://github.com/" + url[len("https://gitee.com/"):]
+    if not (url.startswith("https://github.com/") and url.endswith(".git")):
         return False
+    repo_path = url[len("https://github.com/"):-len(".git")]
+    # codeload 直连放首位（纯 HTTP、无登录墙）；镜像代理兜底（国内受限网络）
+    urls = [f"https://codeload.github.com/{repo_path}/zip/refs/heads/main"]
+    for m in _GIT_MIRRORS:
+        zu = f"{m}/{repo_path}/archive/refs/heads/main.zip"
+        if zu not in urls:
+            urls.append(zu)
+    for zu in urls:
+        try:
+            data = _fetch_url(zu)
+            if _extract_zip_top(data, dest):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _source_local_dir(src: dict) -> Path | None:
@@ -241,7 +331,8 @@ def _expand_files(mod_dir: Path, files: list) -> list[str]:
             for sub in sorted(p.rglob("*")):
                 if not sub.is_file():
                     continue
-                rel = str(sub.relative_to(mod_dir))
+                # 分隔符归一化：Windows 上 str(Path) 为反斜杠，哈希须与作者（Linux 正斜杠）一致
+                rel = str(sub.relative_to(mod_dir)).replace("\\", "/")
                 if "__pycache__" in rel or rel.endswith(".pyc"):
                     continue
                 out.append(rel)
@@ -277,11 +368,9 @@ def _validate_structure(mod_dir: Path, name: str, manifest_entry: dict) -> str |
         return "module.json 结构非法"
     if data.get("name") != name:
         return f"module.json 模块名({data.get('name')!r})与清单({name!r})不一致"
-    worker = mod_dir / f"{name}_worker.py"
-    if not worker.is_file():  # 大小写兼容（如 Planner → planner_worker.py）
-        worker = mod_dir / f"{name.lower()}_worker.py"
-        if not worker.is_file():
-            return f"缺少 {name}_worker.py"
+    from bridge.paths import resolve_worker_path  # 大小写兼容统一真源（Planner → planner_worker.py）
+    if resolve_worker_path(mod_dir, name) is None:
+        return f"缺少 {name}_worker.py"
     return None
 
 
@@ -373,9 +462,14 @@ def install_module(sources: list[dict], sid: str, name: str) -> dict:
         save_sources(sources)
         from bridge.permissions import refresh_permissions
         refresh_permissions()
-        # 安装记录版本（installed.json，部署状态数据区）
+        # 安装记录版本（installed.json，部署状态数据区；源模块附完整性基准 sha256+files）
+        # 基准 = 安装目录最终状态（register 联动可能改写 module.json），确保与校验一致
         from modules.register import save_module_state
-        save_module_state(name, version=str(entry.get("version") or ""), source_id=sid)
+        final_sha = _module_sha256(dest, files) if expected else ""
+        save_module_state(
+            name, version=str(entry.get("version") or ""), source_id=sid,
+            sha256=final_sha, files=files if expected else [],
+        )
         return {"ok": True, "name": name, "enabled": False}
     finally:
         if tmp_root is not None:
@@ -467,7 +561,13 @@ def update_module_from_source(sources: list[dict], sid: str, name: str) -> dict:
         # 更新后联动（schedule 重算 + job 重登记 + 豁免 + 索引刷新）
         from modules.register import refresh_module_config, save_module_state
         refresh_module_config(name)
-        save_module_state(name, version=str(entry.get("version") or ""), source_id=sid)
+        # 更新后刷新完整性基准（本地篡改随更新被覆盖为合法新基准；
+        # 基准 = 更新目录最终状态，联动改写 module.json 后重算）
+        final_sha = _module_sha256(dest, files) if expected else ""
+        save_module_state(
+            name, version=str(entry.get("version") or ""), source_id=sid,
+            sha256=final_sha, files=files if expected else [],
+        )
         for m in src.get("modules", []):
             if m.get("name") == name:
                 m["installed"] = True
@@ -516,3 +616,41 @@ def check_updates(sources: list[dict] | None = None, force: bool = False) -> dic
             elif not r.get("ok"):
                 errors.append((name, r.get("error", "未知错误")))
     return {"checked": True, "updated": updated, "skipped": skipped, "errors": errors}
+
+
+# ---------- 本地完整性校验（防部署机本地修改） ----------
+
+def verify_module_integrity(name: str) -> tuple[bool, str]:
+    """校验已装模块本地完整性：installed.json 基准（sha256+files）重算比对。
+
+    返回 (ok, 描述)；无基准（本地手写模块 / manifest 无 sha256）→ (True, "no-baseline") 跳过。
+    token 文件不在 manifest.files 清单内，不参与哈希（轮换不影响校验）。
+    """
+    from modules.register import get_module_state
+    st = get_module_state(name)
+    sha = st.get("sha256")
+    files = st.get("files")
+    if not sha or not files:
+        return True, "no-baseline"
+    mod_root = MODULES_DIR / name
+    if not mod_root.is_dir():
+        return False, "模块目录缺失"
+    try:
+        actual = _module_sha256(mod_root, files)
+    except Exception as e:
+        return False, f"哈希计算失败: {e}"
+    if actual != sha:
+        return False, "本地文件与安装基准不符（可能被篡改）"
+    return True, "ok"
+
+
+def verify_all_modules() -> list[tuple[str, str]]:
+    """全量校验已装模块：返回 [(name, 问题)]；无基准模块跳过。"""
+    problems: list[tuple[str, str]] = []
+    for sub in sorted(MODULES_DIR.iterdir()):
+        if not (sub / "module.json").is_file():
+            continue
+        ok, why = verify_module_integrity(sub.name)
+        if not ok:
+            problems.append((sub.name, why))
+    return problems
