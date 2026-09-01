@@ -67,6 +67,7 @@ def _write_job(env, slug="Planner-morning-briefing", module="Planner", carrier="
 def test_install_job_degrades_on_readonly_systemd(tmp_path, monkeypatch):
     """platform 载体 OSError（Errno 30 只读等）→ carrier=bridge + job.json 标记。"""
     import bridge.opencode_jobs as oj
+    monkeypatch.setattr("bridge.config.resolve_opencode", lambda: "/usr/bin/opencode")
     monkeypatch.setattr(oj, "_install_systemd",
                         lambda *a, **k: (_ for _ in ()).throw(OSError(30, "Read-only file system")))
     monkeypatch.setattr(oj, "jobs_dir", lambda: tmp_path / "sched-jobs")
@@ -81,9 +82,10 @@ def test_install_job_degrades_on_readonly_systemd(tmp_path, monkeypatch):
 def test_install_job_config_error_still_raises(tmp_path, monkeypatch):
     """cron 配置错不降级（降级也跑不了）。"""
     import bridge.opencode_jobs as oj
+    monkeypatch.setattr("bridge.config.resolve_opencode", lambda: "/usr/bin/opencode")
     monkeypatch.setattr(oj, "jobs_dir", lambda: tmp_path / "sched-jobs2")
     (tmp_path / "sched-jobs2").mkdir(parents=True)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="cron 表达式无效"):
         oj.install_job("Planner", "早报简报", "bad cron expr", prompt="p", dry=False)
 
 
