@@ -1,6 +1,7 @@
 [project]
 name = "wechat-claw"
-version = "0.1.2"
+# 运行版本号唯一真源 = bridge/config.py VERSION；发版只改那一处。
+# 本文件不设 version：无 build-system、不走 pip 安装，字段不被任何工具消费。
 description = "微信主动推送体系：iLink 直连 + opencode 对话 agent（微信可主动关心、可干活）"
 readme = "README.md"
 requires-python = ">=3.11"  # CI/构建统一 3.12（测试与打包同 minor）；本地开发 3.14 可跑但以 CI 为准

@@ -22,11 +22,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from bridge.config import DATA_ROOT, DEPLOY_ROOT, RESOURCE_ROOT, no_window_flags
+from bridge.config import DATA_ROOT, DEPLOY_ROOT, RESOURCE_ROOT, VERSION, no_window_flags
 
 SELFTEST = os.environ.get("WEB_SELFTEST") == "1"
 WEB_PORT = 8650
-VERSION = "0.1.2"
 
 # Windows 用户级自启：HKCU Run 键（登录后自动运行，无需管理员）
 _RUN_KEY = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"

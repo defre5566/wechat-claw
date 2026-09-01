@@ -1,6 +1,6 @@
 """compat：主程序↔模块兼容基线判定（issue #4 拍板机制，260830）。
 
-- 基线 = 主程序版本 major.minor（0.1.5 → "0.1"）：基线内对模块承诺
+- 基线 = 主程序版本 major.minor（如 0.1.x → "0.1"）：基线内对模块承诺
   module.json 字段、common 公共库 API、worker 运行约定不变
 - module.json 必须声明 `bridge_compat: ["0.1", ...]`（强制，未声明/格式错
   = 不兼容——防损坏 module.json 混过门禁）
