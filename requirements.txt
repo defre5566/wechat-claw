@@ -2,7 +2,7 @@
 #   清单见 patches/apply_patches.py；上游版本号与补丁记录见 vendor/wechat_agent_sdk/_VENDOR.md）：
 #   pip install -e ./vendor/wechat_agent_sdk
 # 下方为 SDK 运行时依赖（版本锁死，与 PyPI 版 SDK 一致）
-agent-client-protocol==0.12.0
+agent-client-protocol==0.12.1
 annotated-types==0.8.0
 anyio==4.14.2
 certifi==2026.7.22
