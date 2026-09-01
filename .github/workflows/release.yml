@@ -133,7 +133,7 @@ jobs:
           import re, sys
           version = sys.argv[1]
           text = open("CHANGELOG.md", encoding="utf-8").read()
-          m = re.search(rf"^## \[{re.escape(version)}\]\s+-\s+.*$.*?(?=^## \[|\Z)", text, re.S | re.M)
+          m = re.search(rf"^## \[{re.escape(version)}\]\s+-\s+[^\n]*\n.*?(?=^### 完整明细|^## \[|\Z)", text, re.S | re.M)
           if not m:
               raise SystemExit(f"CHANGELOG 未找到 [{version}] 节，发布中止")
           open(".release-notes.md", "w", encoding="utf-8").write(m.group(0).strip() + "\n")
