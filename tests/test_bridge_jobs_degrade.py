@@ -20,7 +20,13 @@ import pytest
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    """隔离数据根 / sched_root / systemd 目录 + 告警队列收集器。"""
+    """隔离数据根 / sched_root / systemd 目录 + 告警队列收集器 + 子进程桩。
+
+    子进程桩：job 触发链 _run_supervisor 真实 create_subprocess_exec 会在
+    asyncio.run 收尾（_cancel_all_tasks）卡死（三平台 CI 复现：Windows Proactor
+    / mac Selector 的 loop.close 等待子进程 watcher）——测试只验证调度触发语义，
+    不真起 python 子进程。
+    """
     import bridge.config as cfg
     import bridge.opencode_jobs as oj
     import bridge.scheduler as sch
@@ -34,6 +40,17 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "DATA_ROOT", data)
     monkeypatch.setattr(cfg, "WORK_ROOT", data)
     monkeypatch.setattr(oj, "DATA_ROOT", data, raising=False)
+
+    class FakeProc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"", b""
+
+    async def fake_create(*cmd, **kw):
+        return FakeProc()
+
+    monkeypatch.setattr(sch.asyncio, "create_subprocess_exec", fake_create)
 
     sent: list[dict] = []
 
