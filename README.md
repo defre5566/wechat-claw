@@ -52,7 +52,7 @@ git clone <仓库地址> wechat-claw && cd wechat-claw
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/pip install -e ./vendor/wechat_agent_sdk   # vendor 快照（补丁已预打）
-.venv/bin/python patches/apply_patches.py --check-only  # 期望全部 [SKIP] 已打
+.venv/bin/python patches/apply_patches.py --vendor --check-only  # 期望全部 [SKIP] 已打
 ```
 
 守护进程与扫码登录见下方"基础设置"与 [docs/开发文档-03](docs/开发文档-03-操作手册.md)（Linux systemd / macOS launchd / Windows nssm）。
