@@ -41,9 +41,10 @@ def test_job_lines_ring_buffer():
 
 
 def test_job_watchdog_kills_hung_step(monkeypatch):
+    import sys
     import web.wizard as wz
     monkeypatch.setattr(wz, "JOB_TIMEOUT_SECONDS", 1)
-    j = wz.Job("t2", [["sleep", "5"]])
+    j = wz.Job("t2", [[sys.executable, "-c", "import time; time.sleep(5)"]])
     j.start()
     j.thread.join(timeout=10)
     assert j.done and not j.ok

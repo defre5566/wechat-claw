@@ -1,164 +1,95 @@
-# wechat-claw
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/icon-dark.svg">
+    <img src="assets/icon-light.svg" alt="wechat-claw" width="280">
+  </picture>
+</p>
 
-微信主动推送体系：微信 ← iLink Bot API ← wechat-agent-sdk ← **opencode 对话 agent**。
-消息收发、定时推送、权限确认全走微信，agent 可主动关心、可干活，部署者以"对话"管理自己的数字助理。
+<p align="center"><b><big>wechat-claw</big></b></p>
 
-## 特性
+<p align="center">
+  <a href="https://github.com/defre5566/wechat-claw/releases"><img src="https://img.shields.io/github/v/release/defre5566/wechat-claw" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License: MIT"></a>
+  <a href="https://github.com/defre5566/wechat-claw/releases"><img src="https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-blue" alt="Platform"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11%2B-green" alt="Python"></a>
+</p>
 
-- **微信直连**：iLink Bot API 直连，扫码即用，无需服务器/公网域名
-- **5 小时会话窗**：同号延续，超时自动归档
-- **微信确认权限**：高危操作（写文件/发文件）发微信问"允许/拒绝"，30s 无回复默认拒绝
-- **主动推送**：HTTP 入口 `/push`（token 鉴权）→ 队列 → 分流 direct / file / agent
-- **通用调度引擎**：模块自描述（module.json 声明调度/重试），bridge 零业务知识
-- **自描述模块**：新模块写好 worker + module.json 即自动接入，bridge 零改动
-- **基础设施配置化**：`<项目根>/.config/config.yaml` 覆盖用户段默认值（运行参数 bridge 内置），不配也能跑
-- **web 向导 + 管理后台**：初始化向导（体检/opencode/装配/配置/扫码登录/拉起）+ 管理后台（主题/用户与助理/模块管理，管理密码保护）
-- **SDK vendor 快照**：wechat-agent-sdk 0.2.1 全量进仓库，生产补丁预打，安装即修复
-- **Windows 服务零依赖**：NSSM 2.24 二进制随仓库 vendor，nssm 服务化免安装
+---
+
+**易用、安全、只属于你——基于微信官方 ClawBot 协议的 agent 助理，扫码即用。**
+
+wechat-claw 把 AI 助理放进你的微信：陪你聊天，定时给你发消息，重要操作先经你同意。装它不需要服务器、不需要域名、不需要写代码：下载、扫码、开聊。
+
+[快速开始](#快速开始) · [操作手册](docs/开发文档-03-操作手册.md) · [模块开发](docs/开发文档-04-模块开发规范.md) · [变更日志](CHANGELOG.md)
+
+## 快速开始
+
+1. 到 [Releases](https://github.com/defre5566/wechat-claw/releases) 下载对应平台文件：Windows `wechat-claw.exe` · Linux deb · macOS 单文件
+2. 运行，浏览器打开初始化向导（`127.0.0.1:8650`）
+3. 向导依次完成：环境检查 → agent 安装 → 配置生成 → 扫码登录 → 服务启动
+4. 用微信扫码，给自己发一条消息，助理上线
+
+<details>
+<summary>源码部署 / 手动配置（进阶）</summary>
+
+```bash
+git clone https://github.com/defre5566/wechat-claw.git && cd wechat-claw
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e ./vendor/wechat_agent_sdk
+```
+
+守护进程与登录细节见[操作手册](docs/开发文档-03-操作手册.md)（systemd / launchd / nssm）。
+</details>
+
+## 它能做什么
+
+- **陪你聊天**：像真人一样有来有回，会查、会算、会用工具。
+- **定时推送**：到点把消息发进你的微信；你写的脚本，也能借它发。
+- **权限管理**：写文件、发文件前先在微信问你，不回复就当拒绝。
+
+让助理更懂你——易用好用的模块一键装：即插即用，支持热插拔。主体功能不依赖模块——你的助理你掌握。
+
+## 为什么是官方通道
+
+wechat-claw 使用微信官方开放的 Bot 接口（微信 ClawBot，底层 iLink 协议），扫码登录。代码全开源，装了什么、干了什么，你随时看得见；数据只在你自己的机器上，登录凭据加密存放。
+
+| 接入方式 | 官方 | 需要服务器 | 需要自己开发 |
+|---|---|---|---|
+| 微信官方 ClawBot / iLink（本方案） | ✅ | 不需要 | 不需要 |
+| 网页协议模拟 | ❌ | 视方案 | 是 |
+| 客户端注入 | ❌ | Windows 主机 | 是 |
+| 通用 agent 平台的微信通道 | 部分 | 视方案 | 是 |
+
+## 给开发者
+
+- 模块 = 一个 worker + 一份 module.json 声明（调度、重试、权限都写在声明里），核心引擎零改动
+- 官方模块库一键装（现含 Planner 简报、todo）；模块包带 sha256 与 Ed25519 签名校验，防篡改
+- 工程信号：实测对话回复 ~20s 档 · 36 个测试文件 · 三平台 CI · 4 册中文开发文档
 
 ## 架构
 
 ```
-微信 ← iLink Bot API ← wechat-agent-sdk transport ← opencode ACP 子进程
-                              ↑                          ↑
-                    推送入口 /push（9898）        消息处理 / 权限确认
-                              ↑
-               ┌──────────────┴───────────────┐
-               │ bridge/（基础设施，零业务知识）│
-               │  main · push_server · scheduler · session │
-               └──────────────┬───────────────┘
-                              │ build_index() 读
-               ┌──────────────┴───────────────┐
-               │ modules/（业务模块，自描述）  │
-               │  <模块> + module.json + common │
-               └──────────────────────────────┘
+微信 ← 官方 ClawBot / iLink ← bridge ← agent（ACP 子进程）
+                               ↑
+                          modules（业务模块，声明式）
+                               ↑
+                          官方模块库（签名校验）
 ```
 
-分层原则：**bridge** = 基础设施（调度/推送/会话/权限，不认识任何模块业务）；**modules** = 业务（worker + 自描述配置）；**common** = 数据公共库（任务解析/天气/防重 IO/日志/加解密）。
+bridge 是基础设施：调度、推送、会话、权限，不认识任何模块业务；业务全部在模块里，以 module.json 声明接入。
 
-## 前置依赖
-
-| 依赖 | 版本 | 说明 |
-|---|---|---|
-| Python | >= 3.11 | 运行环境 |
-| opencode | 最新 | 对话 agent 运行时（`acp.command` 可配路径）；**web 初始化向导自动检测安装** |
-
-## 安装方式
-
-### 方式 A：源码部署（当前推荐）
-
-```bash
-git clone <仓库地址> wechat-claw && cd wechat-claw
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-.venv/bin/pip install -e ./vendor/wechat_agent_sdk   # vendor 快照（补丁已预打）
-.venv/bin/python patches/apply_patches.py --vendor --check-only  # 期望全部 [SKIP] 已打
-```
-
-守护进程与扫码登录见下方"基础设置"与 [docs/开发文档-03](docs/开发文档-03-操作手册.md)（Linux systemd / macOS launchd / Windows nssm）。
-
-### 方式 B：可执行文件
-
-下载对应平台可执行文件（Release 附件）→ 放到任意目录 → 运行 → **web 初始化向导**完成
-环境装配（opencode 安装 / 配置生成 / 扫码登录 / 拉起服务）。
-
-- Linux/macOS：`./wechat-claw`；Windows：`wechat-claw.exe`
-- 用户数据（`.config/`）落在**平台规范数据根**：Windows `%LOCALAPPDATA%\wechat-claw`、
-  Linux `~/.local/share/wechat-claw`、macOS `~/Library/Application Support/wechat-claw`
-  （`WC_DATA_ROOT` 环境变量可覆盖）；备份 = 打包该目录
-- opencode 不捆绑：向导引导安装官方版本
-- 构建：`.venv/bin/python scripts/build.py`（PyInstaller，不能交叉编译，各平台各自构建）
-
-## 基础设置（两种安装方式共用）
-
-### 1. 配置文件
-
-复制 [config.yaml.example](config.yaml.example) 到项目根 `.config/config.yaml`。**不放置 = 用户段全部使用内置默认值**，本步可选；或用 `web/start.sh`（Linux/macOS）`web/start.bat`（Windows）启动初始化向导自动生成。
-
-### 2. 登录（扫码）
-
-- **主路径**：web 初始化向导扫码登录（`web/start.sh` 启动，第 5 步）
-- **当前可用（过渡）**：在项目根执行一次（token 保存后长期有效，失效时重跑）：
-
-```bash
-.venv/bin/python - <<'EOF'
-import asyncio
-from wechat_agent_sdk.transport import WeChatTransport
-asyncio.run(WeChatTransport(account_id="default").login_terminal())
-EOF
-```
-
-### 3. 对话 agent（opencode ACP）
-
-| 文件 | 作用 |
-|---|---|
-| [AGENTS.md](AGENTS.md) | 开发环境说明（面向本仓 opencode 开发会话；部署态 agent 指引经 instructions 目录装载，不使用 AGENTS.md） |
-| [opencode.jsonc.example](opencode.jsonc.example) | 对话 agent **权限配置模板**（deny 六项 token/密钥；部署时由向导生成为数据根 `opencode.jsonc` 并追加 instructions 指向） |
-
-### 4. 守护进程
-
-- Linux：systemd user 服务（`wechat-bridge.service`，Restart=on-failure + StartLimit）
-- macOS：launchd plist
-- Windows：nssm 服务化（`vendor/nssm/` 已随仓库自带，无需另行安装）
-
-三平台完整配置见 [docs/开发文档-03](docs/开发文档-03-操作手册.md)。
-
-### 5. 验证
-
-- 日志出现 `[weixin] 已连接 iLink` + `[acp] Connection initialized` + `[push] HTTP 入口`
-- 微信发一条消息，agent 正常回复
-
-## 安全模型
-
-- **deny 六项**：对话 agent 不可读 `modules/**/token`、`agent-SDK/push_token`、`modules/**/anniversaries.json.enc`、`agent-SDK/**`、`.config/crypto.key`、`.config/admin.password`（opencode.jsonc.example 默认配置）
-- **文件发送三级**：个人目录直发 / 其余路径微信确认（30s 无回复拒绝）/ token 密钥类硬拒（bridge/paths.py 单点执行，路径规范化防 `../` 与符号链接绕过；`accounts.json` 与 SDK 凭证目录在硬拒清单）
-- **/push 鉴权**：Bearer token 常量时间比较 + sha256 命中模块索引哈希放行，401 记日志（仅 IP，不记 token 片段）
-- **资源保护**：/push body 上限 100MB（413）、队列有界（满 503）
-- **S1 防护**：会话失效 → critical 日志 + 非零退出 → systemd StartLimit 终止循环重启
-- **隐私数据**：AES-GCM 加密存储（common/crypto.py），密钥 chmod 600 + deny；微信登录凭证静态加密（SDK 存储层）
-
-## 模块更新与信任
-
-- 「官方模块库」为**作者个人维护**的 GitHub 仓库，非机构渠道；每日自动更新即代表信任作者账号安全，第三方自定义源风险自担
-- 传输防篡改：模块包 sha256 与 manifest 比对；发布形态启用 Ed25519 签名后，manifest 变更必须通过内置公钥验签，失败拒绝更新
-- 部署机数据根 `.config/trust/TRUST-NOTICE.md` 有完整信任模型存档
-
-## 模块开发
-
-- 标准骨架：`modules/<name>/<name>_worker.py` + `module.json`（调度/重试自声明）+ `规范.md`
-- 铁律摘要：业务知识只进 worker + module.json；调度以 module.json 为唯一事实源；
-  跨模块数据只走 common；失败 return 1（scheduler 感知补发）；测试用 `--dry-run`
-- 完整规范见 [docs/开发文档-04](docs/开发文档-04-模块开发规范.md)
-
-## 目录结构
-
-```
-├── AGENTS.md                        # 对话 agent 系统提示（管理后台生成）
-├── opencode.jsonc.example          # 对话 agent 权限配置示例
-├── config.yaml.example             # 用户配置示例（运行参数 bridge 内置）
-├── bridge/                         # 基础设施：main / push_server / scheduler / session / state
-├── modules/                        # 业务模块 + common（数据公共库）+ register.py + registry_index.py
-├── vendor/wechat_agent_sdk/        # wechat-agent-sdk 0.2.1 全量快照（补丁预打）
-├── vendor/nssm/                    # NSSM 2.24 二进制（Windows 服务化，public domain）
-├── web/                            # 初始化向导 + 管理后台（launcher/wizard/handlers/static）
-│   └── static/cities.json           # 城市库（省市区 + 拼音 + 中心坐标，来源 xiangyuecn/AreaCity-JsSpider-StatsGov，MIT）
-├── .config/                        # 用户配置目录（部署后生成，备份 = 打包此目录）
-├── patches/apply_patches.py        # SDK 补丁（生产 pip 安装重打用；分发侧作校验器）
-├── docs/                           # 开发文档 01-04
-└── tests/                          # 纯函数回归（pytest）
-```
-
-## 文档导航
+## 文档
 
 | 文档 | 内容 |
 |---|---|
 | [开发文档-01](docs/开发文档-01-总览与设计.md) | 架构总览 / 进程端口 / 调度机制 / 权限体系 / 演进记录 |
-| [开发文档-02](docs/开发文档-02-组件参考.md) | SDK 补丁 / bridge 四大块 / common / /push 协议 |
-| [开发文档-03](docs/开发文档-03-操作手册.md) | 从零复现 / systemd·launchd·nssm / 加模块 / 运维排障 |
-| [开发文档-04](docs/开发文档-04-模块开发规范.md) | 模块标准骨架 / module.json 格式 / 铁律 / common 边界 |
+| [开发文档-02](docs/开发文档-02-组件参考.md) | SDK 补丁 / bridge 组件 / /push 协议 |
+| [开发文档-03](docs/开发文档-03-操作手册.md) | 从零复现 / 三平台服务化 / 运维排障 |
+| [开发文档-04](docs/开发文档-04-模块开发规范.md) | 模块骨架 / module.json 格式 / 开发铁律 |
 
-## 规划中
+## License
 
-- **web 初始化向导与管理后台**：已实现（web/，`web/start.sh` / `web/start.bat` 启动）；P1 管理后台增强（模块源下载、日志可视化、schema 表单）规划中
-  - 城市库与定位授权已实现：`web/static/cities.json`（省市区三级 + 拼音 + 中心坐标，天气按区级坐标查询、定位按最近区县匹配；数据源自 [xiangyuecn/AreaCity-JsSpider-StatsGov](https://github.com/xiangyuecn/AreaCity-JsSpider-StatsGov)（MIT，原始数据民政部/国家地名信息库/统计局/高德/腾讯，2026-04-03 版），仅此文件为第三方派生数据）
-- **可执行文件打包**：单文件产物 + 向导装配（README 方式 B）
+MIT。第三方数据：`web/static/cities.json`（省市区坐标库，MIT，原始数据源自民政部/国家地名信息库/统计局/高德/腾讯）。
+
+本项目代码部分由 vibe coding 实现。

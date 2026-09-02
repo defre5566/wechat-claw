@@ -27,13 +27,22 @@ wechat-claw：微信主动推送体系。bridge 引擎（消息收发/调度/推
 - devlog/ 不入库不推送；决策先落 devlog 再动代码
 - 架构决策记录在 devlog，不写死在代码注释里（代码注释只讲当前行为）
 
+## 发布工作流（git 线管理）
+
+- dev 库 = private remote（原称"私库"）；公开仓 = origin（受保护：必须 PR + CI 三平台绿，approvals=0 免审阅）。dev 库是开发线，恒为公开仓超集
+- 三条习惯：
+  1. 所有开发/修复先在 dev 线提交：`git push private main`
+  2. 发布 = 从 dev 线推临时分支开 PR；PR/CI 查出的修复先落 dev 线（push private），再推回 PR 分支，不留"只在公开仓"的修复
+  3. 每次发布合并完成后 dev 线吸收公开仓：`git fetch origin && git merge origin/main`
+- dev 库与公开仓分叉且 dev 无独有内容时，才用 `git push --force-with-lease private main` 一次性对齐（v0.1.6 发布后对齐的先行先例）
+
 ## 安全红线（开发环境同样适用）
 
 - 不读取/转发：modules/**/token、agent-SDK/push_token、anniversaries.json.enc、
   .config/crypto.key、.config/admin.password、~/.wechat-agent-sdk/accounts.json
 - 本仓 opencode.jsonc 为本地私有配置（gitignore），不入库
 
-## 当前改造上下文（260827）
+## 当前状态（260901）
 
-全索引化路线执行中：推送独立单轮渲染（已完成）、instructions 索引生成（已完成）、
-索引器 v0 与会话装配待做。模块↔indexer 接口规格为挂起议题，未经讨论不得实现。
+v0.1.6 首个正式版已发布：全索引化三期、向导/打包、初始化向导、CHANGELOG 提取 note
+机制均已落地。模块↔indexer 接口规格为挂起议题，未经讨论不得实现。
