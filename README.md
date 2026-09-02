@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<h1 align="center">wechat-claw</h1>
+<p align="center"><b><big>wechat-claw</big></b></p>
 
 <p align="center">
   <a href="https://github.com/defre5566/wechat-claw/releases"><img src="https://img.shields.io/github/v/release/defre5566/wechat-claw" alt="Release"></a>
