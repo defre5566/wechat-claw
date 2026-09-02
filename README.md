@@ -1,5 +1,8 @@
 <p align="center">
-  <!-- 图标位置：放 wechat-claw logo / 预览照片，建议宽度 200-400px -->
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/icon-dark.svg">
+    <img src="assets/icon-light.svg" alt="wechat-claw" width="280">
+  </picture>
 </p>
 
 # wechat-claw
