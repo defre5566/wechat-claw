@@ -5,12 +5,16 @@
   </picture>
 </p>
 
-# wechat-claw
+<h1 align="center">wechat-claw</h1>
 
-[![Release](https://img.shields.io/github/v/release/defre5566/wechat-claw)](https://github.com/defre5566/wechat-claw/releases)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-blue)](https://github.com/defre5566/wechat-claw/releases)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-green)](https://www.python.org/)
+<p align="center">
+  <a href="https://github.com/defre5566/wechat-claw/releases"><img src="https://img.shields.io/github/v/release/defre5566/wechat-claw" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License: MIT"></a>
+  <a href="https://github.com/defre5566/wechat-claw/releases"><img src="https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-blue" alt="Platform"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11%2B-green" alt="Python"></a>
+</p>
+
+---
 
 **易用、安全、只属于你——基于微信官方 ClawBot 协议的 agent 助理，扫码即用。**
 
