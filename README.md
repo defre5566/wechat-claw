@@ -91,3 +91,5 @@ bridge 是基础设施：调度、推送、会话、权限，不认识任何模�
 ## License
 
 MIT。第三方数据：`web/static/cities.json`（省市区坐标库，MIT，原始数据源自民政部/国家地名信息库/统计局/高德/腾讯）。
+
+本项目代码部分由 vibe coding 实现。
